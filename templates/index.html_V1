@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controllo Robot</title>
+</head>
+<body>
+    <h1>Controlla il tuo Robot</h1>
+    <button onclick="move('forward')">Avanti</button>
+    <button onclick="move('left')">Sinistra</button>
+    <button onclick="move('stop')">Stop</button>
+    <button onclick="move('right')">Destra</button>
+    <button onclick="move('backward')">Indietro</button>
+
+    <script>
+        function move(direction) {
+            fetch('/move/' + direction);
+        }
+    </script>
+</body>
+</html>
+
