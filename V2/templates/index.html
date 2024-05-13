@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controllo Robot</title>
+</head>
+<body>
+    <h1>Controlla il tuo Robot</h1>
+    <button id="forwardBtn" onmousedown="startMoving('forward')" onmouseup="stopMoving()">Avanti</button>
+    <button id="leftBtn" onmousedown="startMoving('left')" onmouseup="stopMoving()">Sinistra</button>
+    <button id="stopBtn" onclick="stopMoving()">Stop</button>
+    <button id="rightBtn" onmousedown="startMoving('right')" onmouseup="stopMoving()">Destra</button>
+    <button id="backwardBtn" onmousedown="startMoving('backward')" onmouseup="stopMoving()">Indietro</button>
+
+    <script>
+        var movingInterval;
+
+        function startMoving(direction) {
+            movingInterval = setInterval(function() {
+                fetch('/move/' + direction);
+            }, 100); // Regola la velocità del movimento qui (ogni 100 millisecondi)
+        }
+
+        function stopMoving() {
+            clearInterval(movingInterval);
+            fetch('/move/stop');
+        }
+    </script>
+</body>
+</html>

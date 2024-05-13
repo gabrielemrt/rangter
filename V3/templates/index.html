@@ -7,6 +7,10 @@
 </head>
 <body>
     <h1>Controlla il tuo Robot</h1>
+    
+    <img src="{{ url_for('video_feed') }}" width="640" height="480">
+
+
     <button id="forwardBtn" onmousedown="startMoving('forward')" onmouseup="stopMoving()">Avanti</button>
     <button id="leftBtn" onmousedown="startMoving('left')" onmouseup="stopMoving()">Sinistra</button>
     <button id="stopBtn" onclick="stopMoving()">Stop</button>
@@ -29,4 +33,3 @@
     </script>
 </body>
 </html>
-
