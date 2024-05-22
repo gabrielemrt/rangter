@@ -8,8 +8,12 @@
 </head>
 <body>
     <h1>Controlla il tuo Robot</h1>
-    <div id="joystick-container" onmousedown="startControl(event)" onmousemove="moveControl(event)" onmouseup="stopControl()" onmouseleave="stopControl()" ontouchstart="startControl(event)" ontouchmove="moveControl(event)" ontouchend="stopControl()">
-        <div id="joystick"></div>
+    <div id="controls">
+        <button id="forwardBtn" onmousedown="startMoving('forward')" onmouseup="stopMoving()">Avanti</button>
+        <button id="leftBtn" onmousedown="startMoving('left')" onmouseup="stopMoving()">Sinistra</button>
+        <button id="stopBtn" onclick="stopMoving()">Stop</button>
+        <button id="rightBtn" onmousedown="startMoving('right')" onmouseup="stopMoving()">Destra</button>
+        <button id="backwardBtn" onmousedown="startMoving('backward')" onmouseup="stopMoving()">Indietro</button>
     </div>
     <script src="/static/js/control.js"></script>
 </body>
