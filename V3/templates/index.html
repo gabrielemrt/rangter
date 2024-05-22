@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controllo Robot</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
     <h1>Controlla il tuo Robot</h1>
     <div id="joystick-container" onmousedown="startControl(event)" onmousemove="moveControl(event)" onmouseup="stopControl()" onmouseleave="stopControl()" ontouchstart="startControl(event)" ontouchmove="moveControl(event)" ontouchend="stopControl()">
         <div id="joystick"></div>
     </div>
-    <script src="control.js"></script>
+    <script src="/static/js/control.js"></script>
 </body>
 </html>
