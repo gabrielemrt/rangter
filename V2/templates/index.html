@@ -18,7 +18,8 @@
 
         function startMoving(direction) {
             movingInterval = setInterval(function() {
-                fetch('/move/' + direction);
+                //fetch('/move/' + direction);
+                fetch('/move/' + direction).catch(error => console.error('Failed to send the move command:', error));
             }, 100); // Regola la velocità del movimento qui (ogni 100 millisecondi)
         }
 
