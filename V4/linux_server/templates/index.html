@@ -30,38 +30,145 @@
         <button class="btn" onclick="send('F ' + speed())">▲ Avanti</button>
         <div></div>
 
-        <button class="btn" onclick="send('L ' + speed())">◄ Sinistra</button>
-        <button class="btn" onclick="send('S')">■ Stop</button>
-        <button class="btn" onclick="send('R ' + speed())">Destra ►</button>
-
-        <div></div>
-        <button class="btn" onclick="send('B ' + speed())">▼ Indietro</button>
+        <button id="btnF" class="btn" ...>▲ Avanti</button>
+        <button id="btnL" class="btn" ...>◄ Sinistra</button>
+        <button id="btnR" class="btn" ...>Destra ►</button>
+        <button id="btnB" class="btn" ...>▼ Indietro</button>
+        
         <div></div>
       </div>
     </div>
   </div>
 
-<script>
-function speed(){ return document.getElementById('spd').value; }
-
-async function send(c){
-  try {
-    const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
-    const j = await r.json();
-    document.getElementById('status').textContent = j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||''));
-  } catch(e){
-    document.getElementById('status').textContent = 'Errore rete';
-  }
-}
-
-document.addEventListener('keydown', (e)=>{
-  const spd = speed();
-  if(e.code === 'KeyW') send('F ' + spd);
-  if(e.code === 'KeyS') send('B ' + spd);
-  if(e.code === 'KeyA') send('L ' + spd);
-  if(e.code === 'KeyD') send('R ' + spd);
-  if(e.code === 'Space') send('S');
-});
-</script>
+  <script>
+    function speed(){ return document.getElementById('spd').value; }
+    
+    async function send(c){
+      try {
+        const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
+        const j = await r.json();
+        document.getElementById('status').textContent = j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||'')); 
+      } catch(e){
+        document.getElementById('status').textContent = 'Errore rete';
+      }
+    }
+    
+    // --- CONTROLLI DA TASTIERA: hold-to-move ---
+    const pressed = new Set();   // tasti attualmente premuti
+    let lastCmd = 'S';           // ultimo comando inviato
+    let tickTimer = null;        // timer che reinvia i comandi
+    const TICK_MS = 300;         // intervallo di rinnovo (watchdog Arduino è 1000 ms)
+    
+    function mapKeysToCommand() {
+      // priorità: avanti/indietro > rotazioni
+      const up    = pressed.has('KeyW') || pressed.has('ArrowUp');
+      const down  = pressed.has('KeyS') || pressed.has('ArrowDown');
+      const left  = pressed.has('KeyA') || pressed.has('ArrowLeft');
+      const right = pressed.has('KeyD') || pressed.has('ArrowRight');
+      
+      if (up && !down && !left && !right) return `F ${speed()}`;
+      if (down && !up && !left && !right) return `B ${speed()}`;
+      // combinazioni: avanti+sinistra/destra = pivot per semplicità (puoi fare mixing più raffinato lato Arduino)
+      if (left && !right && !up && !down)  return `L ${speed()}`;
+      if (right && !left && !up && !down)  return `R ${speed()}`;
+      // se più tasti insieme, puoi scegliere priorità diversa. Qui stop per evitare ambiguità:
+      if (up && left)  return `L ${speed()}`;   // oppure `F ...` con sterzo differenziale se vuoi
+      if (up && right) return `R ${speed()}`;
+      if (down && left)  return `L ${speed()}`;
+      if (down && right) return `R ${speed()}`;
+      return 'S';
+    }
+    
+    function updateMotion(force=false){
+      const cmd = mapKeysToCommand();
+      if (force || cmd !== lastCmd) {
+        lastCmd = cmd;
+        send(cmd);
+      }
+    }
+    
+    function startTick(){
+      if (tickTimer) return;
+      tickTimer = setInterval(()=> {
+        // reinvia il comando corrente per mantenere vivo il watchdog
+        updateMotion(true);
+      }, TICK_MS);
+    }
+    
+    function stopTick(){
+      if (tickTimer) {
+        clearInterval(tickTimer);
+        tickTimer = null;
+      }
+    }
+    
+    // Evita che frecce/space facciano scroll
+    function suppressBrowser(e){
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
+        e.preventDefault();
+      }
+    }
+    
+    document.addEventListener('keydown', (e)=>{
+      suppressBrowser(e);
+      // Evita autorepeat di keydown
+      if (e.repeat) return;
+      pressed.add(e.code);
+      updateMotion();
+      startTick();
+    });
+    
+    document.addEventListener('keyup', (e)=>{
+      suppressBrowser(e);
+      pressed.delete(e.code);
+      updateMotion();
+      if (pressed.size === 0){
+        stopTick();
+        if (lastCmd !== 'S') { lastCmd = 'S'; send('S'); }
+      }
+    });
+    
+    // Se perdi il focus della pagina, ferma il rover
+    window.addEventListener('blur', ()=>{
+      pressed.clear();
+      stopTick();
+      lastCmd = 'S';
+      send('S');
+    });
+    
+    // --- Pulsanti UI: tieni premuto con mouse/touch ---
+    function hold(cmdStart, cmdStop='S'){
+      let holding = false, holdTimer = null;
+      const start = ()=>{
+        if (holding) return;
+        holding = true;
+        send(cmdStart());
+        holdTimer = setInterval(()=> send(cmdStart()), TICK_MS);
+      };
+      const stop = ()=>{
+        if (!holding) return;
+        holding = false;
+        clearInterval(holdTimer); holdTimer=null;
+        send(cmdStop);
+      };
+      return {start, stop};
+    }
+    
+    // Collega i pulsanti esistenti (se vuoi tenere il comportamento hold anche da mouse)
+    const holdF = hold(()=>`F ${speed()}`);
+    const holdB = hold(()=>`B ${speed()}`);
+    const holdL = hold(()=>`L ${speed()}`);
+    const holdR = hold(()=>`R ${speed()}`);
+    
+    for (const [id, h] of Object.entries({
+      'btnF': holdF, 'btnB': holdB, 'btnL': holdL, 'btnR': holdR
+    })) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      ['mousedown','touchstart'].forEach(ev=> el.addEventListener(ev, h.start));
+      ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> el.addEventListener(ev, h.stop));
+    }
+    </script>
+    
 </body>
 </html>
