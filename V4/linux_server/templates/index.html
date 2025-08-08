@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Rover Control</title>
+  <style>
+    body { text-align: center; font-family: sans-serif; }
+    img { width: 640px; height: 480px; border: 1px solid black; }
+    button {
+      width: 100px; height: 50px;
+      font-size: 18px; margin: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Rover Control Panel</h1>
+  <img src="{{ url_for('video_feed') }}" />
+  <div>
+    <form method="POST" action="/move">
+      <button name="command" value="F">Avanti</button><br>
+      <button name="command" value="L">Sinistra</button>
+      <button name="command" value="S">Stop</button>
+      <button name="command" value="R">Destra</button><br>
+      <button name="command" value="B">Indietro</button>
+    </form>
+  </div>
+</body>
+</html>
