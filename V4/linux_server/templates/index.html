@@ -27,14 +27,15 @@
       <input id="spd" class="speed" type="range" min="80" max="255" value="150"/>
       <div class="grid" style="grid-template-rows: repeat(3, auto);">
         <div></div>
-        <button class="btn" onclick="send('F ' + speed())">▲ Avanti</button>
+        <button class="btnF" onclick="send('F ' + speed())">▲ Avanti</button>
         <div></div>
 
-        <button id="btnF" class="btn" ...>▲ Avanti</button>
-        <button id="btnL" class="btn" ...>◄ Sinistra</button>
-        <button id="btnR" class="btn" ...>Destra ►</button>
-        <button id="btnB" class="btn" ...>▼ Indietro</button>
-        
+        <button class="btnL" onclick="send('L ' + speed())">◄ Sinistra</button>
+        <button class="btnS" onclick="send('S')">■ Stop</button>
+        <button class="btnR" onclick="send('R ' + speed())">Destra ►</button>
+
+        <div></div>
+        <button class="btnB" onclick="send('B ' + speed())">▼ Indietro</button>
         <div></div>
       </div>
     </div>
