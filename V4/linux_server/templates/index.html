@@ -5,14 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Rover Console</title>
   <style>
-    :root { color-scheme: dark; --bg:#0e0f13; --card:#151821; --muted:#9aa3b2; --accent:#6ea8fe; --btn:#242a36; --ring:#202838; }
+    :root { color-scheme: dark; --bg:#0e0f13; --card:#151821; --muted:#9aa3b2; --accent:#6ea8fe; --btn:#242a36; --ring:#202838; --bad:#ff6b6b; --warn:#ffd166; --good:#32d296; }
     * { box-sizing: border-box; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#eaf0ff; }
 
-    .bar { position:sticky; top:0; z-index:10; backdrop-filter:saturate(1.3) blur(6px); background:linear-gradient(180deg, #0e0f13e6, #0e0f1300); border-bottom:1px solid #111622; }
+    .bar { position:sticky; top:0; z-index:20; backdrop-filter:saturate(1.3) blur(6px); background:linear-gradient(180deg, #0e0f13e6, #0e0f1300); border-bottom:1px solid #111622; }
     .bar .inner { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; }
     .title { font-weight:700; letter-spacing:.2px; }
     .hint { font-size:12px; color:var(--muted); }
+
+    .alerts { margin: 10px 14px 0; display:none; }
+    .alert-card { background:#1b1220; border:1px solid #3b2037; border-left:6px solid var(--bad); border-radius:10px; padding:10px 12px; box-shadow:0 0 0 1px rgba(255,255,255,0.02) inset; }
+    .alert-title { font-weight:600; color:#ffd1d9; margin-bottom:6px; }
+    .alert-list { margin:0; padding-left:18px; color:#f4c2c9; }
 
     .wrap { display:grid; grid-template-columns: 1fr 380px; gap:14px; padding:14px; }
     @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
@@ -49,6 +54,12 @@
     <div class="inner">
       <div class="title">Rover Console</div>
       <div class="hint">Tieni premuti <span class="kbd">W A S D</span> o frecce · <span class="kbd">Spazio</span> = luci ON/OFF · Rilascio tasti = STOP</div>
+    </div>
+    <div class="alerts" id="alerts">
+      <div class="alert-card">
+        <div class="alert-title">Allarmi rover</div>
+        <ul class="alert-list" id="alertList"></ul>
+      </div>
     </div>
   </div>
 
@@ -116,7 +127,7 @@
   </div>
 
 <script>
-/* ---------- Helpers base ---------- */
+/* ---------- Helpers ---------- */
 const $ = (id)=>document.getElementById(id);
 const statusEl = $('status');
 
@@ -153,7 +164,6 @@ function mapKeysToCommand() {
   if (left && !right && !up && !down)  return `L ${speed()}`;
   if (right && !left && !up && !down)  return `R ${speed()}`;
 
-  // combinazioni semplici -> pivot (puoi cambiarle a sterzo differenziale quando vuoi)
   if (up && left)  return `L ${speed()}`;
   if (up && right) return `R ${speed()}`;
   if (down && left)  return `L ${speed()}`;
@@ -172,23 +182,18 @@ function updateMotion(force=false){
 function startTick(){ if (!tickTimer) tickTimer = setInterval(()=>updateMotion(true), TICK_MS); }
 function stopTick(){ if (tickTimer) { clearInterval(tickTimer); tickTimer=null; } }
 
-/* impedisci che frecce/space facciano scroll */
 function suppressBrowser(e){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 }
 
-/* ---------- Toggle luci con SPAZIO ---------- */
+/* ---------- Luci: toggle con SPAZIO ---------- */
 const ledStateEl = $('ledState');
 const ledStatusEl = $('ledStatus');
 const colorEl = $('ledColor');
 const brEl = $('ledBr');
-let ledsOn = false; // stato UI (non letto dall'hardware all'avvio)
+let ledsOn = false;
 
-function setLedStateLabel(on){
-  ledsOn = on;
-  ledStateEl.textContent = on ? 'accese' : 'spente';
-}
-
+function setLedStateLabel(on){ ledsOn = on; ledStateEl.textContent = on ? 'accese' : 'spente'; }
 async function sendLedOn(){ const ok = await send('LED ON'); if (ok) setLedStateLabel(true); }
 async function sendLedOff(){ const ok = await send('LED OFF'); if (ok) setLedStateLabel(false); }
 function toggleLights(){ ledsOn ? sendLedOff() : sendLedOn(); }
@@ -198,16 +203,12 @@ document.addEventListener('keydown', (e)=>{
   suppressBrowser(e);
   if (e.repeat) return;
 
-  if (e.code === 'Space') {  // SPAZIO: toggle luci
-    toggleLights();
-    return;
-  }
+  if (e.code === 'Space') { toggleLights(); return; }
 
   pressed.add(e.code);
   updateMotion();
   startTick();
 });
-
 document.addEventListener('keyup', (e)=>{
   suppressBrowser(e);
   pressed.delete(e.code);
@@ -217,16 +218,11 @@ document.addEventListener('keyup', (e)=>{
     if (lastCmd !== 'S') { lastCmd='S'; send('S'); }
   }
 });
-
-/* sicurezza: se perdi il focus, fermati */
 window.addEventListener('blur', ()=>{
-  pressed.clear();
-  stopTick();
-  lastCmd = 'S';
-  send('S');
+  pressed.clear(); stopTick(); lastCmd='S'; send('S');
 });
 
-/* ---------- Pulsanti UI: hold anche da mouse/touch ---------- */
+/* ---------- Pulsanti UI (hold) ---------- */
 function hold(cmdStart, cmdStop='S'){
   let holding = false, holdTimer = null;
   const start = ()=>{
@@ -256,7 +252,7 @@ Object.entries(map).forEach(([id,h])=>{
 });
 $('btnS').addEventListener('click', ()=> send('S'));
 
-/* ---------- Sliders e color ---------- */
+/* ---------- Sliders & color ---------- */
 $('spd').addEventListener('input', ()=> $('spdVal').textContent = $('spd').value);
 
 let colorDebounce=null, brDebounce=null;
@@ -281,15 +277,40 @@ function sendBrightnessNow(){
   send(`LED BR ${v}`);
   ledStatusEl.textContent = `Potenza: ${v}/255`;
 }
-
 colorEl.addEventListener('input', ()=> { clearTimeout(colorDebounce); colorDebounce=setTimeout(sendColorNow, 80); });
 colorEl.addEventListener('change', sendColorNow);
 brEl.addEventListener('input', ()=> { clearTimeout(brDebounce); brDebounce=setTimeout(sendBrightnessNow, 60); });
 brEl.addEventListener('change', sendBrightnessNow);
 
-/* ---------- Bottoni Luci ---------- */
-$('ledOn').addEventListener('click', sendLedOn);
-$('ledOff').addEventListener('click', sendLedOff);
+/* ---------- Banner ALLARMI: polling /health ---------- */
+const alertsWrap = $('alerts');
+const alertList = $('alertList');
+
+async function pollHealth(){
+  const items = [];
+  try {
+    const r = await fetch('/health', {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    if (!j.video)  items.push('Video offline: la camera non sta trasmettendo.');
+    if (!j.serial) items.push('Seriale Arduino offline: controlla USB/alimentazione.');
+    if (!j.ok && j.video && j.serial) items.push('Stato non OK: controlla i log.');
+  } catch(e){
+    items.push('Backend non raggiungibile: verifica che il server sia in esecuzione.');
+  }
+
+  alertList.innerHTML = '';
+  if (items.length){
+    items.forEach(t=>{
+      const li = document.createElement('li'); li.textContent = t; alertList.appendChild(li);
+    });
+    alertsWrap.style.display = 'block';
+  } else {
+    alertsWrap.style.display = 'none';
+  }
+}
+setInterval(pollHealth, 2000);
+pollHealth();
 </script>
 </body>
 </html>
