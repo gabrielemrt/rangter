@@ -1,93 +1,142 @@
 <!doctype html>
-<html>
+<html lang="it">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Rover Console</title>
   <style>
-    :root { color-scheme: dark; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0; background: #0e0e0f; color: #eef0f3; }
-    .wrap { display: grid; grid-template-columns: 1fr 360px; gap: 12px; padding: 12px; }
-    img { width: 100%; height: auto; background: #000; border-radius: 10px; }
-    .panel { background: #16181c; padding: 14px; border-radius: 12px; box-shadow: 0 0 0 1px #20232a inset; }
-    h3 { margin: 0 0 10px; font-size: 16px; font-weight: 600; color: #b7c6ff; }
-    .btn { padding: 10px 14px; margin: 6px; border: 0; border-radius: 8px; background: #2b2f38; color: #fff; cursor: pointer; box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset; }
+    :root { color-scheme: dark; --bg:#0e0f13; --card:#151821; --muted:#9aa3b2; --accent:#6ea8fe; --btn:#242a36; --ring:#202838; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#eaf0ff; }
+
+    .bar { position:sticky; top:0; z-index:10; backdrop-filter:saturate(1.3) blur(6px); background:linear-gradient(180deg, #0e0f13e6, #0e0f1300); border-bottom:1px solid #111622; }
+    .bar .inner { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 14px; }
+    .title { font-weight:700; letter-spacing:.2px; }
+    .hint { font-size:12px; color:var(--muted); }
+
+    .wrap { display:grid; grid-template-columns: 1fr 380px; gap:14px; padding:14px; }
+    @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
+
+    .card { background:var(--card); border:1px solid var(--ring); border-radius:14px; box-shadow:0 0 0 1px rgba(255,255,255,0.02) inset; }
+    .card h3 { margin:0; padding:12px 14px; font-size:15px; color:#cbd8ff; border-bottom:1px solid #1b2030; }
+    .card .content { padding:12px; }
+    .hero { overflow:hidden; border-radius:14px; }
+
+    img.stream { width:100%; height:auto; display:block; background:#000; }
+
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      padding:10px 14px; border-radius:10px; border:1px solid #2a3347; background:var(--btn); color:#fff; cursor:pointer;
+      user-select:none; -webkit-tap-highlight-color:transparent; }
     .btn:active { transform: translateY(1px); }
-    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; justify-items: center; align-items: center; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .range { width: 100%; }
-    label { font-size: 12px; color: #9aa3b2; }
-    .status { font-size: 12px; color: #9aa; margin-top: 8px; }
-    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#22242b; padding:2px 6px; border-radius:6px; border:1px solid #2f3440; }
-    .pill { display:inline-block; padding:4px 8px; background:#222; border:1px solid #2b2b2b; border-radius:999px; font-size:12px; color:#a9b1bd;}
-    @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+    .btn.block { width:100%; }
+
+    .grid3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; }
+    .grid2 { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; }
+    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .label { font-size:12px; color:var(--muted); }
+    .range { width:100%; accent-color:#7aa2ff; }
+    .pill  { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#1b2030; border:1px solid #242b40; font-size:12px; color:#b7c2d6; }
+    .kbd   { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#1d2331; border:1px solid #2a3347; padding:2px 6px; border-radius:6px; }
+
+    .status { font-size:12px; color:var(--muted); margin-top:8px; }
+    input[type="color"] { appearance:none; border:none; padding:0; width:100%; height:42px; border-radius:10px; background:#10131c; border:1px solid #242b40; }
+    input[type="color"]::-webkit-color-swatch-wrapper { padding:0; }
+    input[type="color"]::-webkit-color-swatch { border:none; border-radius:10px; }
   </style>
 </head>
 <body>
+  <div class="bar">
+    <div class="inner">
+      <div class="title">Rover Console</div>
+      <div class="hint">Tieni premuti <span class="kbd">W A S D</span> o frecce · <span class="kbd">Spazio</span> = luci ON/OFF · Rilascio tasti = STOP</div>
+    </div>
+  </div>
+
   <div class="wrap">
-    <div class="panel">
-      <img id="stream" src="/video_feed" alt="stream"/>
-      <div class="status" id="status">
-        Tieni premuti <span class="kbd">WASD</span> o frecce per muovere · <span class="kbd">Space</span> stop · <span class="kbd">H</span> luci ON/OFF
-      </div>
+    <!-- VIDEO -->
+    <div class="card hero">
+      <img class="stream" id="stream" src="/video_feed" alt="stream"/>
     </div>
 
-    <div class="panel">
-      <h3>Controlli movimento</h3>
-      <label for="spd">Velocità motori</label>
-      <input id="spd" class="range" type="range" min="80" max="255" value="150"/>
+    <!-- PANNELLI -->
+    <div class="stack" style="display:flex; flex-direction:column; gap:14px;">
+      <!-- Movimento -->
+      <div class="card">
+        <h3>Controlli movimento</h3>
+        <div class="content">
+          <div class="row">
+            <div class="label">Velocità motori</div>
+            <div class="pill"><span id="spdVal">150</span>/255</div>
+          </div>
+          <input id="spd" class="range" type="range" min="80" max="255" value="150"/>
 
-      <div class="grid" style="grid-template-rows: repeat(3, auto); margin-top:6px;">
-        <div></div>
-        <button id="btnF" class="btn">▲ Avanti</button>
-        <div></div>
+          <div class="grid3" style="margin-top:10px;">
+            <div></div>
+            <button id="btnF" class="btn">▲ Avanti</button>
+            <div></div>
 
-        <button id="btnL" class="btn">◄ Sinistra</button>
-        <button id="btnS" class="btn">■ Stop</button>
-        <button id="btnR" class="btn">Destra ►</button>
+            <button id="btnL" class="btn">◄ Sinistra</button>
+            <button id="btnS" class="btn">■ Stop</button>
+            <button id="btnR" class="btn">Destra ►</button>
 
-        <div></div>
-        <button id="btnB" class="btn">▼ Indietro</button>
-        <div></div>
-      </div>
-    </div>
+            <div></div>
+            <button id="btnB" class="btn">▼ Indietro</button>
+            <div></div>
+          </div>
 
-    <div class="panel">
-      <h3>Luci (NeoPixel)</h3>
-      <div class="row">
-        <button id="ledOn"  class="btn">Luci ON</button>
-        <button id="ledOff" class="btn">Luci OFF</button>
-        <span class="pill" id="ledState">spente</span>
-      </div>
-
-      <div class="row" style="margin-top:10px;">
-        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
-          <label for="ledColor">Colore</label>
-          <input id="ledColor" type="color" value="#ffd28a" style="width:100%; height:40px; border:0; border-radius:8px; background:#222;"/>
-        </div>
-        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
-          <label for="ledBr">Potenza (0-255)</label>
-          <input id="ledBr" class="range" type="range" min="0" max="255" value="60"/>
+          <div class="status" id="status">Pronto.</div>
         </div>
       </div>
-      <div class="status" id="ledStatus" style="margin-top:8px;">Colore e potenza aggiornabili in tempo reale.</div>
+
+      <!-- Luci -->
+      <div class="card">
+        <h3>Luci (NeoPixel)</h3>
+        <div class="content">
+          <div class="row">
+            <button id="ledOn"  class="btn">Luci ON</button>
+            <button id="ledOff" class="btn">Luci OFF</button>
+            <span class="pill">Stato: <strong id="ledState">spente</strong></span>
+          </div>
+
+          <div class="grid2" style="margin-top:10px;">
+            <div>
+              <div class="row"><div class="label">Colore</div></div>
+              <input id="ledColor" type="color" value="#ffd28a"/>
+            </div>
+            <div>
+              <div class="row"><div class="label">Potenza</div><div class="pill"><span id="brVal">60</span>/255</div></div>
+              <input id="ledBr" class="range" type="range" min="0" max="255" value="60"/>
+            </div>
+          </div>
+
+          <div class="status" id="ledStatus">Usa <span class="kbd">Spazio</span> per ON/OFF veloce.</div>
+        </div>
+      </div>
     </div>
   </div>
 
 <script>
-function speed(){ return document.getElementById('spd').value; }
+/* ---------- Helpers base ---------- */
+const $ = (id)=>document.getElementById(id);
+const statusEl = $('status');
 
+function setStatus(t){ statusEl.textContent = t; }
+function speed(){ return $('spd').value; }
+
+/* ---------- Invio comandi backend ---------- */
 async function send(c){
   try {
     const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
     const j = await r.json();
-    document.getElementById('status').textContent = j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||'')); 
+    setStatus(j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||'')));
+    return j.ok;
   } catch(e){
-    document.getElementById('status').textContent = 'Errore rete';
+    setStatus('Errore rete');
+    return false;
   }
 }
 
-// --- CONTROLLI DA TASTIERA: hold-to-move ---
+/* ---------- Movimento: hold-to-move ---------- */
 const pressed = new Set();
 let lastCmd = 'S';
 let tickTimer = null;
@@ -104,7 +153,7 @@ function mapKeysToCommand() {
   if (left && !right && !up && !down)  return `L ${speed()}`;
   if (right && !left && !up && !down)  return `R ${speed()}`;
 
-  // combinazioni semplici -> pivot
+  // combinazioni semplici -> pivot (puoi cambiarle a sterzo differenziale quando vuoi)
   if (up && left)  return `L ${speed()}`;
   if (up && right) return `R ${speed()}`;
   if (down && left)  return `L ${speed()}`;
@@ -120,35 +169,64 @@ function updateMotion(force=false){
     send(cmd);
   }
 }
-function startTick(){
-  if (tickTimer) return;
-  tickTimer = setInterval(()=> updateMotion(true), TICK_MS);
-}
-function stopTick(){
-  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-}
+function startTick(){ if (!tickTimer) tickTimer = setInterval(()=>updateMotion(true), TICK_MS); }
+function stopTick(){ if (tickTimer) { clearInterval(tickTimer); tickTimer=null; } }
+
+/* impedisci che frecce/space facciano scroll */
 function suppressBrowser(e){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 }
 
+/* ---------- Toggle luci con SPAZIO ---------- */
+const ledStateEl = $('ledState');
+const ledStatusEl = $('ledStatus');
+const colorEl = $('ledColor');
+const brEl = $('ledBr');
+let ledsOn = false; // stato UI (non letto dall'hardware all'avvio)
+
+function setLedStateLabel(on){
+  ledsOn = on;
+  ledStateEl.textContent = on ? 'accese' : 'spente';
+}
+
+async function sendLedOn(){ const ok = await send('LED ON'); if (ok) setLedStateLabel(true); }
+async function sendLedOff(){ const ok = await send('LED OFF'); if (ok) setLedStateLabel(false); }
+function toggleLights(){ ledsOn ? sendLedOff() : sendLedOn(); }
+
+/* ---------- Key handlers ---------- */
 document.addEventListener('keydown', (e)=>{
   suppressBrowser(e);
   if (e.repeat) return;
-  if (e.code === 'Space') { pressed.clear(); stopTick(); lastCmd='S'; send('S'); return; }
-  if (e.code === 'KeyH') { toggleLights(); return; } // H = toggle luci
+
+  if (e.code === 'Space') {  // SPAZIO: toggle luci
+    toggleLights();
+    return;
+  }
+
   pressed.add(e.code);
   updateMotion();
   startTick();
 });
+
 document.addEventListener('keyup', (e)=>{
   suppressBrowser(e);
   pressed.delete(e.code);
   updateMotion();
-  if (pressed.size === 0){ stopTick(); if (lastCmd !== 'S') { lastCmd='S'; send('S'); } }
+  if (pressed.size === 0){
+    stopTick();
+    if (lastCmd !== 'S') { lastCmd='S'; send('S'); }
+  }
 });
-window.addEventListener('blur', ()=>{ pressed.clear(); stopTick(); lastCmd='S'; send('S'); });
 
-// --- Pulsanti UI: hold anche da mouse/touch ---
+/* sicurezza: se perdi il focus, fermati */
+window.addEventListener('blur', ()=>{
+  pressed.clear();
+  stopTick();
+  lastCmd = 'S';
+  send('S');
+});
+
+/* ---------- Pulsanti UI: hold anche da mouse/touch ---------- */
 function hold(cmdStart, cmdStop='S'){
   let holding = false, holdTimer = null;
   const start = ()=>{
@@ -165,29 +243,23 @@ function hold(cmdStart, cmdStop='S'){
   };
   return {start, stop};
 }
-const holdF = hold(()=>`F ${speed()}`), holdB = hold(()=>`B ${speed()}`), holdL = hold(()=>`L ${speed()}`), holdR = hold(()=>`R ${speed()}`);
-const byId = id => document.getElementById(id);
-[['btnF',holdF],['btnB',holdB],['btnL',holdL],['btnR',holdR]].forEach(([id,h])=>{
-  const el = byId(id); if (!el) return;
+const map = {
+  btnF: hold(()=>`F ${speed()}`),
+  btnB: hold(()=>`B ${speed()}`),
+  btnL: hold(()=>`L ${speed()}`),
+  btnR: hold(()=>`R ${speed()}`)
+};
+Object.entries(map).forEach(([id,h])=>{
+  const el = $(id); if (!el) return;
   ['mousedown','touchstart'].forEach(ev=> el.addEventListener(ev, h.start));
   ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> el.addEventListener(ev, h.stop));
 });
-byId('btnS').addEventListener('click', ()=> send('S'));
+$('btnS').addEventListener('click', ()=> send('S'));
 
-// --- LUCI: ON/OFF, colore, potenza ---
-const ledStateEl = document.getElementById('ledState');
-const ledStatusEl = document.getElementById('ledStatus');
-const colorEl = document.getElementById('ledColor');
-const brEl = document.getElementById('ledBr');
+/* ---------- Sliders e color ---------- */
+$('spd').addEventListener('input', ()=> $('spdVal').textContent = $('spd').value);
 
-function setLedStateLabel(on){ ledStateEl.textContent = on ? 'accese' : 'spente'; }
-
-async function sendLedOn(){ await send('LED ON'); setLedStateLabel(true); }
-async function sendLedOff(){ await send('LED OFF'); setLedStateLabel(false); }
-function toggleLights(){
-  const on = ledStateEl.textContent !== 'accese';
-  on ? sendLedOn() : sendLedOff();
-}
+let colorDebounce=null, brDebounce=null;
 
 function hexToRgb(hex){
   let h = hex.replace('#','');
@@ -197,11 +269,6 @@ function hexToRgb(hex){
   const b = parseInt(h.slice(4,6),16);
   return {r,g,b};
 }
-
-// invio “morbido”: quando cambi colore/potenza mandiamo subito,
-// e se l’utente trascina, limitiamo la frequenza con un piccolo debounce.
-let colorDebounce=null, brDebounce=null;
-
 function sendColorNow(){
   const {r,g,b} = hexToRgb(colorEl.value);
   send(`LED RGB ${r} ${g} ${b}`);
@@ -210,23 +277,19 @@ function sendColorNow(){
 }
 function sendBrightnessNow(){
   const v = brEl.value;
+  $('brVal').textContent = v;
   send(`LED BR ${v}`);
-  ledStatusEl.textContent = `Potenza (brightness): ${v}/255`;
+  ledStatusEl.textContent = `Potenza: ${v}/255`;
 }
-colorEl.addEventListener('input', ()=>{
-  clearTimeout(colorDebounce);
-  colorDebounce = setTimeout(sendColorNow, 80);
-});
-colorEl.addEventListener('change', sendColorNow);
 
-brEl.addEventListener('input', ()=>{
-  clearTimeout(brDebounce);
-  brDebounce = setTimeout(sendBrightnessNow, 60);
-});
+colorEl.addEventListener('input', ()=> { clearTimeout(colorDebounce); colorDebounce=setTimeout(sendColorNow, 80); });
+colorEl.addEventListener('change', sendColorNow);
+brEl.addEventListener('input', ()=> { clearTimeout(brDebounce); brDebounce=setTimeout(sendBrightnessNow, 60); });
 brEl.addEventListener('change', sendBrightnessNow);
 
-document.getElementById('ledOn').addEventListener('click', sendLedOn);
-document.getElementById('ledOff').addEventListener('click', sendLedOff);
+/* ---------- Bottoni Luci ---------- */
+$('ledOn').addEventListener('click', sendLedOn);
+$('ledOff').addEventListener('click', sendLedOff);
 </script>
 </body>
 </html>
