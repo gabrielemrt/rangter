@@ -5,171 +5,228 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Rover Console</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 0; padding: 0; background: #111; color: #eee; }
-    .wrap { display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px; }
-    video, img { width: 100%; height: auto; background: #000; border-radius: 8px; }
-    .panel { background: #1a1a1a; padding: 12px; border-radius: 8px; }
-    .btn { padding: 10px 14px; margin: 6px; border: 0; border-radius: 6px; background: #2f2f2f; color: #fff; cursor: pointer; }
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 0; background: #0e0e0f; color: #eef0f3; }
+    .wrap { display: grid; grid-template-columns: 1fr 360px; gap: 12px; padding: 12px; }
+    img { width: 100%; height: auto; background: #000; border-radius: 10px; }
+    .panel { background: #16181c; padding: 14px; border-radius: 12px; box-shadow: 0 0 0 1px #20232a inset; }
+    h3 { margin: 0 0 10px; font-size: 16px; font-weight: 600; color: #b7c6ff; }
+    .btn { padding: 10px 14px; margin: 6px; border: 0; border-radius: 8px; background: #2b2f38; color: #fff; cursor: pointer; box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset; }
     .btn:active { transform: translateY(1px); }
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; justify-items: center; align-items: center; }
-    .speed { width: 100%; }
-    .status { font-size: 12px; color: #9aa; margin-top: 6px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .range { width: 100%; }
+    label { font-size: 12px; color: #9aa3b2; }
+    .status { font-size: 12px; color: #9aa; margin-top: 8px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#22242b; padding:2px 6px; border-radius:6px; border:1px solid #2f3440; }
+    .pill { display:inline-block; padding:4px 8px; background:#222; border:1px solid #2b2b2b; border-radius:999px; font-size:12px; color:#a9b1bd;}
+    @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="panel">
       <img id="stream" src="/video_feed" alt="stream"/>
-      <div class="status" id="status">WSAD o pulsanti per muovere. Spazio = Stop</div>
+      <div class="status" id="status">
+        Tieni premuti <span class="kbd">WASD</span> o frecce per muovere · <span class="kbd">Space</span> stop · <span class="kbd">H</span> luci ON/OFF
+      </div>
     </div>
+
     <div class="panel">
-      <h3>Controlli</h3>
-      <input id="spd" class="speed" type="range" min="80" max="255" value="150"/>
-      <div class="grid" style="grid-template-rows: repeat(3, auto);">
+      <h3>Controlli movimento</h3>
+      <label for="spd">Velocità motori</label>
+      <input id="spd" class="range" type="range" min="80" max="255" value="150"/>
+
+      <div class="grid" style="grid-template-rows: repeat(3, auto); margin-top:6px;">
         <div></div>
-        <button class="btnF" onclick="send('F ' + speed())">▲ Avanti</button>
+        <button id="btnF" class="btn">▲ Avanti</button>
         <div></div>
 
-        <button class="btnL" onclick="send('L ' + speed())">◄ Sinistra</button>
-        <button class="btnS" onclick="send('S')">■ Stop</button>
-        <button class="btnR" onclick="send('R ' + speed())">Destra ►</button>
+        <button id="btnL" class="btn">◄ Sinistra</button>
+        <button id="btnS" class="btn">■ Stop</button>
+        <button id="btnR" class="btn">Destra ►</button>
 
         <div></div>
-        <button class="btnB" onclick="send('B ' + speed())">▼ Indietro</button>
+        <button id="btnB" class="btn">▼ Indietro</button>
         <div></div>
       </div>
     </div>
+
+    <div class="panel">
+      <h3>Luci (NeoPixel)</h3>
+      <div class="row">
+        <button id="ledOn"  class="btn">Luci ON</button>
+        <button id="ledOff" class="btn">Luci OFF</button>
+        <span class="pill" id="ledState">spente</span>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
+          <label for="ledColor">Colore</label>
+          <input id="ledColor" type="color" value="#ffd28a" style="width:100%; height:40px; border:0; border-radius:8px; background:#222;"/>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:6px; flex:1;">
+          <label for="ledBr">Potenza (0-255)</label>
+          <input id="ledBr" class="range" type="range" min="0" max="255" value="60"/>
+        </div>
+      </div>
+      <div class="status" id="ledStatus" style="margin-top:8px;">Colore e potenza aggiornabili in tempo reale.</div>
+    </div>
   </div>
 
-  <script>
-    function speed(){ return document.getElementById('spd').value; }
-    
-    async function send(c){
-      try {
-        const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
-        const j = await r.json();
-        document.getElementById('status').textContent = j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||'')); 
-      } catch(e){
-        document.getElementById('status').textContent = 'Errore rete';
-      }
-    }
-    
-    // --- CONTROLLI DA TASTIERA: hold-to-move ---
-    const pressed = new Set();   // tasti attualmente premuti
-    let lastCmd = 'S';           // ultimo comando inviato
-    let tickTimer = null;        // timer che reinvia i comandi
-    const TICK_MS = 300;         // intervallo di rinnovo (watchdog Arduino è 1000 ms)
-    
-    function mapKeysToCommand() {
-      // priorità: avanti/indietro > rotazioni
-      const up    = pressed.has('KeyW') || pressed.has('ArrowUp');
-      const down  = pressed.has('KeyS') || pressed.has('ArrowDown');
-      const left  = pressed.has('KeyA') || pressed.has('ArrowLeft');
-      const right = pressed.has('KeyD') || pressed.has('ArrowRight');
-      
-      if (up && !down && !left && !right) return `F ${speed()}`;
-      if (down && !up && !left && !right) return `B ${speed()}`;
-      // combinazioni: avanti+sinistra/destra = pivot per semplicità (puoi fare mixing più raffinato lato Arduino)
-      if (left && !right && !up && !down)  return `L ${speed()}`;
-      if (right && !left && !up && !down)  return `R ${speed()}`;
-      // se più tasti insieme, puoi scegliere priorità diversa. Qui stop per evitare ambiguità:
-      if (up && left)  return `L ${speed()}`;   // oppure `F ...` con sterzo differenziale se vuoi
-      if (up && right) return `R ${speed()}`;
-      if (down && left)  return `L ${speed()}`;
-      if (down && right) return `R ${speed()}`;
-      return 'S';
-    }
-    
-    function updateMotion(force=false){
-      const cmd = mapKeysToCommand();
-      if (force || cmd !== lastCmd) {
-        lastCmd = cmd;
-        send(cmd);
-      }
-    }
-    
-    function startTick(){
-      if (tickTimer) return;
-      tickTimer = setInterval(()=> {
-        // reinvia il comando corrente per mantenere vivo il watchdog
-        updateMotion(true);
-      }, TICK_MS);
-    }
-    
-    function stopTick(){
-      if (tickTimer) {
-        clearInterval(tickTimer);
-        tickTimer = null;
-      }
-    }
-    
-    // Evita che frecce/space facciano scroll
-    function suppressBrowser(e){
-      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) {
-        e.preventDefault();
-      }
-    }
-    
-    document.addEventListener('keydown', (e)=>{
-      suppressBrowser(e);
-      // Evita autorepeat di keydown
-      if (e.repeat) return;
-      pressed.add(e.code);
-      updateMotion();
-      startTick();
-    });
-    
-    document.addEventListener('keyup', (e)=>{
-      suppressBrowser(e);
-      pressed.delete(e.code);
-      updateMotion();
-      if (pressed.size === 0){
-        stopTick();
-        if (lastCmd !== 'S') { lastCmd = 'S'; send('S'); }
-      }
-    });
-    
-    // Se perdi il focus della pagina, ferma il rover
-    window.addEventListener('blur', ()=>{
-      pressed.clear();
-      stopTick();
-      lastCmd = 'S';
-      send('S');
-    });
-    
-    // --- Pulsanti UI: tieni premuto con mouse/touch ---
-    function hold(cmdStart, cmdStop='S'){
-      let holding = false, holdTimer = null;
-      const start = ()=>{
-        if (holding) return;
-        holding = true;
-        send(cmdStart());
-        holdTimer = setInterval(()=> send(cmdStart()), TICK_MS);
-      };
-      const stop = ()=>{
-        if (!holding) return;
-        holding = false;
-        clearInterval(holdTimer); holdTimer=null;
-        send(cmdStop);
-      };
-      return {start, stop};
-    }
-    
-    // Collega i pulsanti esistenti (se vuoi tenere il comportamento hold anche da mouse)
-    const holdF = hold(()=>`F ${speed()}`);
-    const holdB = hold(()=>`B ${speed()}`);
-    const holdL = hold(()=>`L ${speed()}`);
-    const holdR = hold(()=>`R ${speed()}`);
-    
-    for (const [id, h] of Object.entries({
-      'btnF': holdF, 'btnB': holdB, 'btnL': holdL, 'btnR': holdR
-    })) {
-      const el = document.getElementById(id);
-      if (!el) continue;
-      ['mousedown','touchstart'].forEach(ev=> el.addEventListener(ev, h.start));
-      ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> el.addEventListener(ev, h.stop));
-    }
-    </script>
-    
+<script>
+function speed(){ return document.getElementById('spd').value; }
+
+async function send(c){
+  try {
+    const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
+    const j = await r.json();
+    document.getElementById('status').textContent = j.ok ? ('Inviato: ' + c) : ('Errore: ' + (j.err||'')); 
+  } catch(e){
+    document.getElementById('status').textContent = 'Errore rete';
+  }
+}
+
+// --- CONTROLLI DA TASTIERA: hold-to-move ---
+const pressed = new Set();
+let lastCmd = 'S';
+let tickTimer = null;
+const TICK_MS = 300;
+
+function mapKeysToCommand() {
+  const up    = pressed.has('KeyW') || pressed.has('ArrowUp');
+  const down  = pressed.has('KeyS') || pressed.has('ArrowDown');
+  const left  = pressed.has('KeyA') || pressed.has('ArrowLeft');
+  const right = pressed.has('KeyD') || pressed.has('ArrowRight');
+
+  if (up && !down && !left && !right) return `F ${speed()}`;
+  if (down && !up && !left && !right) return `B ${speed()}`;
+  if (left && !right && !up && !down)  return `L ${speed()}`;
+  if (right && !left && !up && !down)  return `R ${speed()}`;
+
+  // combinazioni semplici -> pivot
+  if (up && left)  return `L ${speed()}`;
+  if (up && right) return `R ${speed()}`;
+  if (down && left)  return `L ${speed()}`;
+  if (down && right) return `R ${speed()}`;
+
+  return 'S';
+}
+
+function updateMotion(force=false){
+  const cmd = mapKeysToCommand();
+  if (force || cmd !== lastCmd) {
+    lastCmd = cmd;
+    send(cmd);
+  }
+}
+function startTick(){
+  if (tickTimer) return;
+  tickTimer = setInterval(()=> updateMotion(true), TICK_MS);
+}
+function stopTick(){
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+function suppressBrowser(e){
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+}
+
+document.addEventListener('keydown', (e)=>{
+  suppressBrowser(e);
+  if (e.repeat) return;
+  if (e.code === 'Space') { pressed.clear(); stopTick(); lastCmd='S'; send('S'); return; }
+  if (e.code === 'KeyH') { toggleLights(); return; } // H = toggle luci
+  pressed.add(e.code);
+  updateMotion();
+  startTick();
+});
+document.addEventListener('keyup', (e)=>{
+  suppressBrowser(e);
+  pressed.delete(e.code);
+  updateMotion();
+  if (pressed.size === 0){ stopTick(); if (lastCmd !== 'S') { lastCmd='S'; send('S'); } }
+});
+window.addEventListener('blur', ()=>{ pressed.clear(); stopTick(); lastCmd='S'; send('S'); });
+
+// --- Pulsanti UI: hold anche da mouse/touch ---
+function hold(cmdStart, cmdStop='S'){
+  let holding = false, holdTimer = null;
+  const start = ()=>{
+    if (holding) return;
+    holding = true;
+    send(cmdStart());
+    holdTimer = setInterval(()=> send(cmdStart()), TICK_MS);
+  };
+  const stop = ()=>{
+    if (!holding) return;
+    holding = false;
+    clearInterval(holdTimer); holdTimer=null;
+    send(cmdStop);
+  };
+  return {start, stop};
+}
+const holdF = hold(()=>`F ${speed()}`), holdB = hold(()=>`B ${speed()}`), holdL = hold(()=>`L ${speed()}`), holdR = hold(()=>`R ${speed()}`);
+const byId = id => document.getElementById(id);
+[['btnF',holdF],['btnB',holdB],['btnL',holdL],['btnR',holdR]].forEach(([id,h])=>{
+  const el = byId(id); if (!el) return;
+  ['mousedown','touchstart'].forEach(ev=> el.addEventListener(ev, h.start));
+  ['mouseup','mouseleave','touchend','touchcancel'].forEach(ev=> el.addEventListener(ev, h.stop));
+});
+byId('btnS').addEventListener('click', ()=> send('S'));
+
+// --- LUCI: ON/OFF, colore, potenza ---
+const ledStateEl = document.getElementById('ledState');
+const ledStatusEl = document.getElementById('ledStatus');
+const colorEl = document.getElementById('ledColor');
+const brEl = document.getElementById('ledBr');
+
+function setLedStateLabel(on){ ledStateEl.textContent = on ? 'accese' : 'spente'; }
+
+async function sendLedOn(){ await send('LED ON'); setLedStateLabel(true); }
+async function sendLedOff(){ await send('LED OFF'); setLedStateLabel(false); }
+function toggleLights(){
+  const on = ledStateEl.textContent !== 'accese';
+  on ? sendLedOn() : sendLedOff();
+}
+
+function hexToRgb(hex){
+  let h = hex.replace('#','');
+  if (h.length===3) h = h.split('').map(c=>c+c).join('');
+  const r = parseInt(h.slice(0,2),16);
+  const g = parseInt(h.slice(2,4),16);
+  const b = parseInt(h.slice(4,6),16);
+  return {r,g,b};
+}
+
+// invio “morbido”: quando cambi colore/potenza mandiamo subito,
+// e se l’utente trascina, limitiamo la frequenza con un piccolo debounce.
+let colorDebounce=null, brDebounce=null;
+
+function sendColorNow(){
+  const {r,g,b} = hexToRgb(colorEl.value);
+  send(`LED RGB ${r} ${g} ${b}`);
+  setLedStateLabel(true);
+  ledStatusEl.textContent = `Colore RGB: ${r}, ${g}, ${b}`;
+}
+function sendBrightnessNow(){
+  const v = brEl.value;
+  send(`LED BR ${v}`);
+  ledStatusEl.textContent = `Potenza (brightness): ${v}/255`;
+}
+colorEl.addEventListener('input', ()=>{
+  clearTimeout(colorDebounce);
+  colorDebounce = setTimeout(sendColorNow, 80);
+});
+colorEl.addEventListener('change', sendColorNow);
+
+brEl.addEventListener('input', ()=>{
+  clearTimeout(brDebounce);
+  brDebounce = setTimeout(sendBrightnessNow, 60);
+});
+brEl.addEventListener('change', sendBrightnessNow);
+
+document.getElementById('ledOn').addEventListener('click', sendLedOn);
+document.getElementById('ledOff').addEventListener('click', sendLedOff);
+</script>
 </body>
 </html>
