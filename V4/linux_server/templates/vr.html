@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>Rover VR</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; padding:0; height:100%; background:#000; color:#fff; font-family:system-ui, sans-serif; }
+    .hud { position:fixed; top:0; left:0; right:0; display:flex; gap:8px; padding:8px; background:linear-gradient(#0008, #0000); z-index:2; align-items:center; }
+    .btn { padding:10px 14px; border:0; border-radius:10px; background:#1f2530; color:#fff; cursor:pointer; }
+    .btn:active { transform:translateY(1px); }
+    .info { font-size:12px; opacity:.8; margin-left:auto; }
+    .stage { position:fixed; inset:0; display:grid; grid-template-columns:1fr 1fr; gap:0; }
+    img { width:100%; height:100%; object-fit:cover; display:block; }
+    .centerline { position:fixed; top:0; bottom:0; left:50%; width:1px; background:#444; opacity:.6; z-index:1; }
+    .dim { filter:brightness(var(--br,1)); }
+    .warn { position:fixed; bottom:10px; left:50%; transform:translateX(-50%); background:#c62828; padding:6px 10px; border-radius:8px; font-size:12px; display:none; }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <button class="btn" id="fs">Schermo intero</button>
+    <button class="btn" id="rot">Blocca orizzontale</button>
+    <label class="btn" style="display:flex; align-items:center; gap:8px;">
+      Luminosità
+      <input id="br" type="range" min="50" max="150" value="100" />
+    </label>
+    <div class="info">/video_feed · monoscopico (doppio canale)</div>
+  </div>
+  <div class="centerline"></div>
+  <div class="stage">
+    <img id="left"  class="dim"  src="/video_feed" alt="left eye"/>
+    <img id="right" class="dim"  src="/video_feed" alt="right eye"/>
+  </div>
+  <div class="warn" id="warn">Stream non raggiungibile</div>
+
+<script>
+const qs = (s)=>document.querySelector(s);
+const left = qs('#left'), right = qs('#right');
+
+qs('#fs').onclick = ()=>{
+  const el = document.documentElement;
+  if (!document.fullscreenElement) { el.requestFullscreen?.(); } else { document.exitFullscreen?.(); }
+};
+
+qs('#rot').onclick = async ()=>{
+  if (screen.orientation && screen.orientation.lock) {
+    try { await screen.orientation.lock('landscape'); } catch(e) {}
+  }
+};
+
+qs('#br').addEventListener('input', (e)=>{
+  const v = e.target.value / 100; // 0.5 .. 1.5
+  document.documentElement.style.setProperty('--br', v);
+});
+
+// ping semplice per avviso
+async function ping(){
+  try {
+    const r = await fetch('/health', {cache:'no-store'}); 
+    const ok = r.ok ? (await r.json()).video : false;
+    qs('#warn').style.display = ok ? 'none' : 'block';
+  } catch {
+    qs('#warn').style.display = 'block';
+  }
+}
+setInterval(ping, 2000); ping();
+
+// evitiamo gesture back su mobile
+window.addEventListener('touchmove', (e)=>{ if (e.touches.length>1) e.preventDefault(); }, {passive:false});
+</script>
+</body>
+</html>

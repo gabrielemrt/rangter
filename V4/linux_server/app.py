@@ -51,3 +51,7 @@ def health():
     video_ok = (cap is not None and cap.isOpened())
     serial_ok = (ser is not None and ser.is_open)
     return jsonify(video=video_ok, serial=serial_ok, ok=(video_ok and serial_ok))
+
+@app.route('/vr')
+def vr():
+    return render_template('vr.html')
