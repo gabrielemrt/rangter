@@ -153,30 +153,50 @@ void ledsApply(bool on){
 void ledsOn(){ ledsApply(true); }
 void ledsOff(){ ledsApply(false); }
 
-void handleLED(const String &cmd){
+void handleLED(const String &cmd) {
   if (cmd.equalsIgnoreCase("LED ON"))  { ledsOn();  Serial.println("OK LED ON");  return; }
   if (cmd.equalsIgnoreCase("LED OFF")) { ledsOff(); Serial.println("OK LED OFF"); return; }
-  if (cmd.startsWith("LED RGB")){
-    int i1=cmd.indexOf(' ',3), i2=cmd.indexOf(' ',i1+1);
-    if (i2>0){
-      String rest=cmd.substring(i2+1); rest.trim();
-      int p1=rest.indexOf(' '), p2=rest.lastIndexOf(' ');
-      if (p1>0 && p2>p1){
-        ledR=constrain(rest.substring(0,p1).toInt(),0,255);
-        ledG=constrain(rest.substring(p1+1,p2).toInt(),0,255);
-        ledB=constrain(rest.substring(p2+1).toInt(),0,255);
-        ledsOn(); Serial.println("OK LED RGB"); return;
+
+  if (cmd.startsWith("LED RGB")) {
+    // formato: LED RGB r g b  (aggiorna il colore ma NON forza ON)
+    int i1 = cmd.indexOf(' ', 3);
+    int i2 = cmd.indexOf(' ', i1 + 1);
+    if (i2 > 0) {
+      String rest = cmd.substring(i2 + 1); rest.trim();
+      int a=0, b=0, c=0;
+      int p1 = rest.indexOf(' ');
+      int p2 = rest.lastIndexOf(' ');
+      if (p1 > 0 && p2 > p1) {
+        a = constrain(rest.substring(0, p1).toInt(), 0, 255);
+        b = constrain(rest.substring(p1 + 1, p2).toInt(), 0, 255);
+        c = constrain(rest.substring(p2 + 1).toInt(), 0, 255);
+        ledR = a; ledG = b; ledB = c;
+        // Applica SOLO se attualmente ON; altrimenti resta spento
+        ledsApply(leds_are_on);
+        Serial.println("OK LED RGB");
+        return;
       }
     }
-    Serial.println("ERR LED RGB"); return;
+    Serial.println("ERR LED RGB");
+    return;
   }
-  if (cmd.startsWith("LED BR")){
-    int i=cmd.lastIndexOf(' ');
-    if (i>0){ ledBrightness=constrain(cmd.substring(i+1).toInt(),0,255); ledsApply(leds_are_on); Serial.println("OK LED BR"); return; }
-    Serial.println("ERR LED BR"); return;
+
+  if (cmd.startsWith("LED BR")) {
+    // formato: LED BR n (0–255) mantiene stato ON/OFF
+    int i = cmd.lastIndexOf(' ');
+    if (i > 0) {
+      ledBrightness = constrain(cmd.substring(i + 1).toInt(), 0, 255);
+      ledsApply(leds_are_on);
+      Serial.println("OK LED BR");
+      return;
+    }
+    Serial.println("ERR LED BR");
+    return;
   }
+
   Serial.println("ERR LED");
 }
+
 
 // --------- SERVI ---------
 void attachServos(){ if (servos_attached) return; for(int i=0;i<4;i++){ servos[i].attach(SERVO_PINS[i]); servos[i].write(constrain(servoAngles[i],0,180)); } servos_attached=true; }

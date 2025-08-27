@@ -45,6 +45,12 @@ async function loadSettings(){
     for (let i=0;i<4;i++){
       if ($('sv'+i)) { $('sv'+i).value = sa[i]; if ($('sv'+i+'Val')) $('sv'+i+'Val').textContent = sa[i]; }
     }
+
+    const on = !!s.led_on;
+    if (typeof on === 'boolean') {
+      setLedStateLabel(on);     // aggiorna “accese/spente”
+      ledsOn = on;              // stato interno
+    }
   }catch(e){}
 }
 async function saveSettings(patch, apply=false){
@@ -52,6 +58,15 @@ async function saveSettings(patch, apply=false){
     await fetch('/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...patch, apply})});
   }catch(e){}
 }
+async function sendLedOn(){
+    const ok = await send('LED ON');
+    if (ok) { setLedStateLabel(true); saveSettings({led_on: true}); }
+  }
+  async function sendLedOff(){
+    const ok = await send('LED OFF');
+    if (ok) { setLedStateLabel(false); saveSettings({led_on: false}); }
+  }
+  
 loadSettings();
 
 /* ---------- MOVIMENTO: hold + tastiera ---------- */

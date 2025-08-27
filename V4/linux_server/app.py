@@ -47,6 +47,7 @@ SETTINGS_PATH = BASE_DIR / "settings.json"
 DEFAULT_SETTINGS = {
     "led_color": [255, 180, 100],      # R,G,B
     "led_brightness": 60,              # 0-255
+    "led_on": False,
     "motor_default_speed": 150,        # slider di default lato UI
     "servo_angles": [90, 90, 90, 90],  # Base, Spalla, Gomito, Pinza
 }
@@ -155,7 +156,7 @@ def gen_frames():
 
 # ============== Applicazione settings all'avvio ==========
 def apply_settings_to_arduino():
-    """Invia a Arduino le impostazioni persistite (LED/servi) e marca applied_once."""
+    """Invia a Arduino le impostazioni persistite e marca applied_once."""
     global applied_once
     if ser is None or not ser.is_open:
         print("[settings] seriale non disponibile: skip apply")
@@ -164,15 +165,20 @@ def apply_settings_to_arduino():
     try:
         r, g, b = settings.get("led_color", DEFAULT_SETTINGS["led_color"])
         br = int(settings.get("led_brightness", DEFAULT_SETTINGS["led_brightness"]))
+        on = bool(settings.get("led_on", DEFAULT_SETTINGS["led_on"]))
+        # 1) aggiorna parametri SENZA accendere
         ser.write(f"LED BR {br}\n".encode('ascii')); time.sleep(0.02)
         ser.write(f"LED RGB {r} {g} {b}\n".encode('ascii')); time.sleep(0.02)
+        # 2) stato finale
+        ser.write(( "LED ON\n" if on else "LED OFF\n").encode('ascii')); time.sleep(0.02)
+        # Servi
         angles = settings.get("servo_angles", DEFAULT_SETTINGS["servo_angles"])
         if isinstance(angles, (list, tuple)) and len(angles) == 4:
             for i, a in enumerate(angles):
                 ser.write(f"SV {i} {int(a)}\n".encode('ascii'))
                 time.sleep(0.01)
         ok = True
-        print("[settings] applicate")
+        print("[settings] applicate (LED {}, BR {}, RGB {},{},{})".format("ON" if on else "OFF", br, r, g, b))
     except Exception as e:
         print("[settings] apply error:", e)
     if ok:
@@ -197,6 +203,16 @@ def video_feed():
 def cmd():
     data = request.get_json(silent=True) or {}
     c = (data.get('c') or '').strip()
+
+    # Aggiorna settings quando l'utente fa ON/OFF dalla UI
+    cu = c.upper()
+    if cu == "LED ON":
+        settings["led_on"] = True
+        save_settings()
+    elif cu == "LED OFF":
+        settings["led_on"] = False
+        save_settings()
+
 
     if not c:
         return jsonify(ok=False, err="missing command"), 400
@@ -240,7 +256,7 @@ def get_settings():
 def set_settings():
     data = request.get_json(silent=True) or {}
     changed = False
-    for k in ("led_color", "led_brightness", "motor_default_speed", "servo_angles"):
+    for k in ("led_color", "led_brightness", "led_on", "motor_default_speed", "servo_angles"):
         if k in data:
             settings[k] = data[k]
             changed = True
