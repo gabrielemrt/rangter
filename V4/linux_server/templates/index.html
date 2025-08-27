@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Rover Console</title>
   <style>
-    :root { color-scheme: dark; --bg:#0e0f13; --card:#151821; --muted:#9aa3b2; --accent:#6ea8fe; --btn:#242a36; --ring:#202838; --bad:#ff6b6b; --warn:#ffd166; --good:#32d296; }
+    :root { color-scheme: dark; --bg:#0e0f13; --card:#151821; --muted:#9aa3b2; --accent:#6ea8fe; --btn:#242a36; --ring:#202838; --bad:#ff6b6b; }
     * { box-sizing: border-box; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:#eaf0ff; }
 
@@ -15,11 +15,11 @@
     .hint { font-size:12px; color:var(--muted); }
 
     .alerts { margin: 10px 14px 0; display:none; }
-    .alert-card { background:#1b1220; border:1px solid #3b2037; border-left:6px solid var(--bad); border-radius:10px; padding:10px 12px; box-shadow:0 0 0 1px rgba(255,255,255,0.02) inset; }
+    .alert-card { background:#1b1220; border:1px solid #3b2037; border-left:6px solid var(--bad); border-radius:10px; padding:10px 12px; }
     .alert-title { font-weight:600; color:#ffd1d9; margin-bottom:6px; }
     .alert-list { margin:0; padding-left:18px; color:#f4c2c9; }
 
-    .wrap { display:grid; grid-template-columns: 1fr 380px; gap:14px; padding:14px; }
+    .wrap { display:grid; grid-template-columns: 1fr 390px; gap:14px; padding:14px; }
     @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
 
     .card { background:var(--card); border:1px solid var(--ring); border-radius:14px; box-shadow:0 0 0 1px rgba(255,255,255,0.02) inset; }
@@ -47,13 +47,19 @@
     input[type="color"] { appearance:none; border:none; padding:0; width:100%; height:42px; border-radius:10px; background:#10131c; border:1px solid #242b40; }
     input[type="color"]::-webkit-color-swatch-wrapper { padding:0; }
     input[type="color"]::-webkit-color-swatch { border:none; border-radius:10px; }
+    .topbar-actions { display:flex; gap:8px; align-items:center; }
+    a.link { color:#b7c6ff; text-decoration:none; border:1px solid #2a3347; padding:8px 12px; border-radius:10px; background:#1a2230; }
+    a.link:active { transform: translateY(1px); }
   </style>
 </head>
 <body>
   <div class="bar">
     <div class="inner">
       <div class="title">Rover Console</div>
-      <div class="hint">Tieni premuti <span class="kbd">W A S D</span> o frecce · <span class="kbd">Spazio</span> = luci ON/OFF · Rilascio tasti = STOP</div>
+      <div class="topbar-actions">
+        <a class="link" href="/vr" target="_blank" rel="noopener">Modalità VR</a>
+        <div class="hint">Tieni premuti <span class="kbd">W A S D</span> o frecce · <span class="kbd">Spazio</span> = luci ON/OFF · rilascio tasti = STOP</div>
+      </div>
     </div>
     <div class="alerts" id="alerts">
       <div class="alert-card">
@@ -76,7 +82,7 @@
         <h3>Controlli movimento</h3>
         <div class="content">
           <div class="row">
-            <div class="label">Velocità motori</div>
+            <div class="label">Velocità motori (default)</div>
             <div class="pill"><span id="spdVal">150</span>/255</div>
           </div>
           <input id="spd" class="range" type="range" min="80" max="255" value="150"/>
@@ -124,6 +130,7 @@
         </div>
       </div>
 
+      <!-- Braccio -->
       <div class="card">
         <h3>Braccio robotico</h3>
         <div class="content">
@@ -132,7 +139,7 @@
             <button id="svDetach" class="btn">Stacca servi</button>
             <button id="svHome"   class="btn">Vai HOME</button>
           </div>
-      
+
           <div class="grid2">
             <div>
               <div class="row"><div class="label">Base (Y)</div><div class="pill"><span id="sv0Val">90</span>°</div></div>
@@ -151,11 +158,10 @@
               <input id="sv3" class="range" type="range" min="0" max="180" value="90"/>
             </div>
           </div>
-      
-          <div class="status">Sposta gli slider: l’angolo appare accanto. Quando hai definito gli HOME desiderati, dimmeli e li fisso nel firmware.</div>
+
+          <div class="status">Regola gli slider: gli angoli sono mostrati accanto. Quando hai gli HOME definitivi, li fisso nel firmware.</div>
         </div>
       </div>
-      
     </div>
   </div>
 
@@ -163,11 +169,10 @@
 /* ---------- Helpers ---------- */
 const $ = (id)=>document.getElementById(id);
 const statusEl = $('status');
-
 function setStatus(t){ statusEl.textContent = t; }
 function speed(){ return $('spd').value; }
 
-/* ---------- Invio comandi backend ---------- */
+/* ---------- Backend ---------- */
 async function send(c){
   try {
     const r = await fetch('/cmd', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({c})});
@@ -180,7 +185,42 @@ async function send(c){
   }
 }
 
-/* ---------- Movimento: hold-to-move ---------- */
+/* ---------- SETTINGS persistenti ---------- */
+async function loadSettings(){
+  try{
+    const r = await fetch('/settings', {cache:'no-store'});
+    const s = await r.json();
+
+    // LED
+    const [cr,cg,cb] = s.led_color || [255,180,100];
+    const hex = '#' + [cr,cg,cb].map(x=>x.toString(16).padStart(2,'0')).join('');
+    $('ledColor').value = hex;
+
+    $('ledBr').value = s.led_brightness ?? 60;
+    $('brVal').textContent = $('ledBr').value;
+
+    // velocità default
+    if (s.motor_default_speed){
+      const sp = String(s.motor_default_speed);
+      $('spd').value = sp;
+      $('spdVal').textContent = sp;
+    }
+
+    // servi
+    const sa = s.servo_angles || [90,90,90,90];
+    for (let i=0;i<4;i++){
+      if ($('sv'+i)) { $('sv'+i).value = sa[i]; $('sv'+i+'Val').textContent = sa[i]; }
+    }
+  }catch(e){}
+}
+async function saveSettings(patch, apply=false){
+  try{
+    await fetch('/settings', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...patch, apply})});
+  }catch(e){}
+}
+loadSettings();
+
+/* ---------- MOVIMENTO: hold + tastiera ---------- */
 const pressed = new Set();
 let lastCmd = 'S';
 let tickTimer = null;
@@ -204,7 +244,6 @@ function mapKeysToCommand() {
 
   return 'S';
 }
-
 function updateMotion(force=false){
   const cmd = mapKeysToCommand();
   if (force || cmd !== lastCmd) {
@@ -213,23 +252,28 @@ function updateMotion(force=false){
   }
 }
 function startTick(){ if (!tickTimer) tickTimer = setInterval(()=>updateMotion(true), TICK_MS); }
-function stopTick(){ if (tickTimer) { clearInterval(tickTimer); tickTimer=null; } }
+function stopTick(){ if (tickTimer){ clearInterval(tickTimer); tickTimer=null; } }
 
 function suppressBrowser(e){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 }
 
-/* ---------- Luci: toggle con SPAZIO ---------- */
-const ledStateEl = $('ledState');
-const ledStatusEl = $('ledStatus');
-const colorEl = $('ledColor');
-const brEl = $('ledBr');
-let ledsOn = false;
-
-function setLedStateLabel(on){ ledsOn = on; ledStateEl.textContent = on ? 'accese' : 'spente'; }
-async function sendLedOn(){ const ok = await send('LED ON'); if (ok) setLedStateLabel(true); }
-async function sendLedOff(){ const ok = await send('LED OFF'); if (ok) setLedStateLabel(false); }
-function toggleLights(){ ledsOn ? sendLedOff() : sendLedOn(); }
+/* ---------- SAFETY: ARM/HB/DISARM ---------- */
+let hbTimer = null;
+async function arm(){
+  await send('ARM');
+  if (!hbTimer) hbTimer = setInterval(()=> send('HB'), 200);
+}
+function disarm(){
+  if (hbTimer){ clearInterval(hbTimer); hbTimer=null; }
+  send('S');
+  send('DISARM');
+}
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') arm(); else disarm(); });
+window.addEventListener('load', arm);
+window.addEventListener('beforeunload', disarm);
+window.addEventListener('blur', disarm);
+window.addEventListener('focus', arm);
 
 /* ---------- Key handlers ---------- */
 document.addEventListener('keydown', (e)=>{
@@ -250,9 +294,6 @@ document.addEventListener('keyup', (e)=>{
     stopTick();
     if (lastCmd !== 'S') { lastCmd='S'; send('S'); }
   }
-});
-window.addEventListener('blur', ()=>{
-  pressed.clear(); stopTick(); lastCmd='S'; send('S');
 });
 
 /* ---------- Pulsanti UI (hold) ---------- */
@@ -287,8 +328,7 @@ $('btnS').addEventListener('click', ()=> send('S'));
 
 /* ---------- Sliders & color ---------- */
 $('spd').addEventListener('input', ()=> $('spdVal').textContent = $('spd').value);
-
-let colorDebounce=null, brDebounce=null;
+$('spd').addEventListener('change', ()=> saveSettings({motor_default_speed: Number($('spd').value)}));
 
 function hexToRgb(hex){
   let h = hex.replace('#','');
@@ -298,27 +338,65 @@ function hexToRgb(hex){
   const b = parseInt(h.slice(4,6),16);
   return {r,g,b};
 }
+
+const ledStateEl = $('ledState');
+const ledStatusEl = $('ledStatus');
+const colorEl = $('ledColor');
+const brEl = $('ledBr');
+let ledsOn = false;
+
+function setLedStateLabel(on){ ledsOn = on; ledStateEl.textContent = on ? 'accese' : 'spente'; }
+async function sendLedOn(){ const ok = await send('LED ON'); if (ok) setLedStateLabel(true); }
+async function sendLedOff(){ const ok = await send('LED OFF'); if (ok) setLedStateLabel(false); }
+function toggleLights(){ ledsOn ? sendLedOff() : sendLedOn(); }
+
+let colorDebounce=null, brDebounce=null;
 function sendColorNow(){
   const {r,g,b} = hexToRgb(colorEl.value);
   send(`LED RGB ${r} ${g} ${b}`);
   setLedStateLabel(true);
   ledStatusEl.textContent = `Colore RGB: ${r}, ${g}, ${b}`;
+  saveSettings({led_color:[r,g,b]});
 }
 function sendBrightnessNow(){
   const v = brEl.value;
   $('brVal').textContent = v;
   send(`LED BR ${v}`);
   ledStatusEl.textContent = `Potenza: ${v}/255`;
+  saveSettings({led_brightness: Number(v)});
 }
 colorEl.addEventListener('input', ()=> { clearTimeout(colorDebounce); colorDebounce=setTimeout(sendColorNow, 80); });
 colorEl.addEventListener('change', sendColorNow);
 brEl.addEventListener('input', ()=> { clearTimeout(brDebounce); brDebounce=setTimeout(sendBrightnessNow, 60); });
 brEl.addEventListener('change', sendBrightnessNow);
 
-/* ---------- Banner ALLARMI: polling /health ---------- */
+/* ---------- Braccio: slider + pulsanti ---------- */
+function bindServoSlider(id, idx){
+  const slider = document.getElementById(id);
+  const label  = document.getElementById(id + "Val");
+  let debounce = null;
+  const sendNow = ()=>{
+    const a = parseInt(slider.value);
+    label.textContent = a;
+    send(`SV ${idx} ${a}`);
+    const arr = [0,1,2,3].map(i => Number(document.getElementById('sv'+i)?.value || 90));
+    saveSettings({servo_angles: arr});
+  };
+  slider.addEventListener('input', ()=>{ label.textContent = slider.value; clearTimeout(debounce); debounce=setTimeout(sendNow, 50); });
+  slider.addEventListener('change', sendNow);
+}
+bindServoSlider('sv0', 0);
+bindServoSlider('sv1', 1);
+bindServoSlider('sv2', 2);
+bindServoSlider('sv3', 3);
+
+$('svAttach').addEventListener('click', ()=> send('SV ATTACH'));
+$('svDetach').addEventListener('click', ()=> send('SV DETACH'));
+$('svHome').addEventListener('click',   ()=> send('SV HOME'));
+
+/* ---------- Banner ALLARMI (/health) ---------- */
 const alertsWrap = $('alerts');
 const alertList = $('alertList');
-
 async function pollHealth(){
   const items = [];
   try {
@@ -331,7 +409,6 @@ async function pollHealth(){
   } catch(e){
     items.push('Backend non raggiungibile: verifica che il server sia in esecuzione.');
   }
-
   alertList.innerHTML = '';
   if (items.length){
     items.forEach(t=>{
@@ -342,34 +419,8 @@ async function pollHealth(){
     alertsWrap.style.display = 'none';
   }
 }
-
 setInterval(pollHealth, 2000);
 pollHealth();
 </script>
-
-<script>
-  // ---- Braccio: helper per slider -> comando SV i a ----
-  function bindServoSlider(id, idx){
-    const slider = document.getElementById(id);
-    const label  = document.getElementById(id + "Val");
-    let debounce = null;
-    const sendNow = ()=>{ const a = parseInt(slider.value); label.textContent = a; send(`SV ${idx} ${a}`); };
-    slider.addEventListener('input', ()=>{
-      label.textContent = slider.value;
-      clearTimeout(debounce);
-      debounce = setTimeout(sendNow, 50);
-    });
-    slider.addEventListener('change', sendNow);
-  }
-  bindServoSlider('sv0', 0);
-  bindServoSlider('sv1', 1);
-  bindServoSlider('sv2', 2);
-  bindServoSlider('sv3', 3);
-  
-  document.getElementById('svAttach').addEventListener('click', ()=> send('SV ATTACH'));
-  document.getElementById('svDetach').addEventListener('click', ()=> send('SV DETACH'));
-  document.getElementById('svHome').addEventListener('click',   ()=> send('SV HOME'));
-  </script>
-  
 </body>
 </html>
