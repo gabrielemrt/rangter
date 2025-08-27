@@ -1,0 +1,15 @@
+{
+    "led_color": [
+    0,
+    0,
+    255
+  ],
+  "led_brightness": 133,
+  "motor_default_speed": 150,
+  "servo_angles": [
+    90,
+    90,
+    90,
+    90
+  ]
+}
