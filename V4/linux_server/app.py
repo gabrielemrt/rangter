@@ -94,19 +94,19 @@ def open_arduino():
 
 ser = None  # inizializzato dopo load_settings()
 
-# ============== Camera (robusta, auto-detect) ============
-def try_open_index(idx, fourcc_pref=None):
+# ============== Camera HUB: single-producer, multi-consumer ==============
+import threading
+
+def _try_open_index(idx, fourcc_pref=None):
     cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
     if not cap or not cap.isOpened():
         if cap: cap.release()
         return None
-    # Parametri base
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 20)
     if fourcc_pref:
         cap.set(cv2.CAP_PROP_FOURCC, fourcc_pref)
-    # Test lettura
     ok, frame = cap.read()
     if ok and frame is not None:
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -116,43 +116,83 @@ def try_open_index(idx, fourcc_pref=None):
     cap.release()
     return None
 
-def open_camera():
-    # Prova MJPG prima, poi YUY2, su index 0..3
+def _open_camera_any():
     for idx in range(4):
-        cap = try_open_index(idx, cv2.VideoWriter_fourcc(*'MJPG'))
+        cap = _try_open_index(idx, cv2.VideoWriter_fourcc(*'MJPG'))
         if cap: return cap
     for idx in range(4):
-        cap = try_open_index(idx, cv2.VideoWriter_fourcc(*'YUY2'))
+        cap = _try_open_index(idx, cv2.VideoWriter_fourcc(*'YUY2'))
         if cap: return cap
     print("[cam] nessuna camera disponibile")
     return None
 
-cap = None  # inizializzato dopo load_settings()
+class VideoHub:
+    def __init__(self):
+        self.cap = None
+        self.lock = threading.Lock()
+        self.last_jpeg = None
+        self.running = False
+        self.thread = None
 
-def gen_frames():
-    """Generator per stream MJPEG."""
-    global cap
-    while True:
-        if cap is None or not cap.isOpened():
-            time.sleep(2.0)
-            cap = open_camera()
-            continue
+    def start(self):
+        if self.running: return
+        self.running = True
+        self.cap = _open_camera_any()
+        self.thread = threading.Thread(target=self._loop, daemon=True)
+        self.thread.start()
 
-        ok, frame = cap.read()
-        if not ok or frame is None:
+    def _loop(self):
+        while self.running:
+            if self.cap is None or not self.cap.isOpened():
+                time.sleep(1.0)
+                self.cap = _open_camera_any()
+                continue
             try:
-                cap.release()
-            except Exception:
-                pass
-            cap = None
-            continue
+                ok, frame = self.cap.read()
+            except cv2.error:
+                ok, frame = False, None
+            if not ok or frame is None:
+                # riapri la camera
+                try:
+                    self.cap.release()
+                except Exception:
+                    pass
+                self.cap = None
+                continue
+            # encoda a JPEG una volta sola per tutti i client
+            try:
+                ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+                if ret:
+                    with self.lock:
+                        self.last_jpeg = buf.tobytes()
+            except cv2.error:
+                # salta frame corrotti e continua
+                continue
+            # piccolo respiro per non saturare la CPU (FPS ~20 già impostato)
+            time.sleep(0.001)
 
-        # JPEG encode
-        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-        if not ret:
+    def get_jpeg(self):
+        with self.lock:
+            return self.last_jpeg
+
+video_hub = VideoHub()
+video_hub.start()
+
+def mjpeg_generator():
+    boundary = b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
+    while True:
+        jpg = video_hub.get_jpeg()
+        if jpg is None:
+            time.sleep(0.05)
             continue
-        jpg = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + jpg + b'\r\n')
+        try:
+            yield boundary + jpg + b'\r\n'
+        except GeneratorExit:
+            # client ha chiuso la connessione
+            break
+        except Exception:
+            # qualsiasi errore di socket: interrompi questo client
+            break
 
 # ============== Applicazione settings all'avvio ==========
 def apply_settings_to_arduino():
@@ -196,8 +236,8 @@ def vr():
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(gen_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(mjpeg_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 
 @app.route('/cmd', methods=['POST'])
 def cmd():
@@ -272,7 +312,6 @@ def bootstrap():
     global ser, cap, applied_once
     load_settings()
     ser = open_arduino()
-    cap = open_camera()
     # Attendi che l'Arduino annunci READY (reset auto su apertura seriale)
     if ser and ser.is_open:
         ready = wait_arduino_ready(ser, timeout=5.0)
