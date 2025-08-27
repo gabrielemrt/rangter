@@ -12,6 +12,32 @@ import serial
 import serial.tools.list_ports
 from flask import Flask, render_template, Response, request, jsonify
 
+# flag per capire se abbiamo applicato i settaggi con successo
+applied_once = False
+applied_lock = threading.Lock()
+
+def wait_arduino_ready(port, timeout=5.0):
+    """Legge la seriale finché non vede 'READY' (o timeout)."""
+    try:
+        port.reset_input_buffer()
+    except Exception:
+        pass
+    t0 = time.time()
+    buf = b""
+    while time.time() - t0 < timeout:
+        try:
+            if port.in_waiting:
+                buf += port.readline()
+                if b"READY" in buf:
+                    print("[serial] READY ricevuto")
+                    return True
+        except Exception:
+            pass
+        time.sleep(0.05)
+    print("[serial] READY non ricevuto entro timeout")
+    return False
+
+
 # ============== Flask app (prima di tutto!) ==============
 app = Flask(__name__)
 
@@ -129,25 +155,29 @@ def gen_frames():
 
 # ============== Applicazione settings all'avvio ==========
 def apply_settings_to_arduino():
-    """Invia a Arduino le impostazioni persistite (senza ARM)."""
+    """Invia a Arduino le impostazioni persistite (LED/servi) e marca applied_once."""
+    global applied_once
     if ser is None or not ser.is_open:
         print("[settings] seriale non disponibile: skip apply")
         return
+    ok = False
     try:
         r, g, b = settings.get("led_color", DEFAULT_SETTINGS["led_color"])
         br = int(settings.get("led_brightness", DEFAULT_SETTINGS["led_brightness"]))
-        ser.write(f"LED BR {br}\n".encode('ascii'))
-        time.sleep(0.02)
-        ser.write(f"LED RGB {r} {g} {b}\n".encode('ascii'))
-        time.sleep(0.02)
+        ser.write(f"LED BR {br}\n".encode('ascii')); time.sleep(0.02)
+        ser.write(f"LED RGB {r} {g} {b}\n".encode('ascii')); time.sleep(0.02)
         angles = settings.get("servo_angles", DEFAULT_SETTINGS["servo_angles"])
         if isinstance(angles, (list, tuple)) and len(angles) == 4:
             for i, a in enumerate(angles):
                 ser.write(f"SV {i} {int(a)}\n".encode('ascii'))
                 time.sleep(0.01)
-        print("[settings] applicate all'avvio")
+        ok = True
+        print("[settings] applicate")
     except Exception as e:
         print("[settings] apply error:", e)
+    if ok:
+        with applied_lock:
+            applied_once = True
 
 # ============== Routes ===================================
 @app.route('/')
@@ -165,18 +195,35 @@ def video_feed():
 
 @app.route('/cmd', methods=['POST'])
 def cmd():
-    """Inoltra il comando JSON {"c": "..."} alla seriale."""
     data = request.get_json(silent=True) or {}
     c = (data.get('c') or '').strip()
+
     if not c:
         return jsonify(ok=False, err="missing command"), 400
     if ser is None or not ser.is_open:
         return jsonify(ok=False, err="serial not available"), 503
+
+    # --- se è LED ON e non abbiamo ancora applicato i settaggi, applicali ora ---
+    if c.upper() == "LED ON":
+        with applied_lock:
+            pending = not applied_once
+        if pending:
+            apply_settings_to_arduino()
+            # piccolo delay per garantire ordine dei comandi
+            time.sleep(0.02)
+
     try:
         ser.write((c + "\n").encode('ascii'))
         return jsonify(ok=True)
     except Exception as e:
         return jsonify(ok=False, err=str(e)), 500
+
+
+@app.route('/apply_settings_now', methods=['POST'])
+def apply_settings_now():
+    threading.Thread(target=apply_settings_to_arduino, daemon=True).start()
+    return jsonify(ok=True)
+
 
 @app.route('/health')
 def health():
@@ -206,12 +253,19 @@ def set_settings():
 
 # ============== Bootstrap =================================
 def bootstrap():
-    global ser, cap
+    global ser, cap, applied_once
     load_settings()
     ser = open_arduino()
     cap = open_camera()
-    # Applica le impostazioni dopo un breve delay (tempo per il boot del Nano)
-    threading.Timer(0.6, apply_settings_to_arduino).start()
+    # Attendi che l'Arduino annunci READY (reset auto su apertura seriale)
+    if ser and ser.is_open:
+        ready = wait_arduino_ready(ser, timeout=5.0)
+        # anche se non lo vediamo, proviamo ad applicare dopo un attimo
+        delay = 0.2 if ready else 1.5
+        threading.Timer(delay, apply_settings_to_arduino).start()
+    else:
+        applied_once = False
+
 
 bootstrap()
 
