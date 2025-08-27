@@ -1,44 +1,62 @@
-// RoverControl_NoEN_Neo.ino
-// L298N (solo N1..N4, senza ENA/ENB) + strip NeoPixel su D3 (9 LED).
-// Protocollo seriale: F n, B n, L n, R n, S, LED ON/OFF, LED RGB r g b, LED BR n
+// RoverControl_MotorsServos_Neo.ino
+// - L298N senza ENA/ENB con pin ottimizzati per coesistenza Servo
+// - 4 Servi (Base, Spalla, Gomito, Pinza)
+// - NeoPixel su D3 (già esistente)
 
 #include <Adafruit_NeoPixel.h>
+#include <Servo.h>
 
 // ------------------ PIN MOTORI (L298N) ------------------
-// Assunzione: N1,N2 = canale sinistro | N3,N4 = canale destro
-// Collega N1->D8, N2->D9, N3->D10, N4->D11
-const int L1 = 8;   // N1 sinistro
-const int L2 = 9;   // N2 sinistro
-const int R1 = 10;  // N3 destro
-const int R2 = 11;  // N4 destro
+// Sinistra: due PWM (D5, D6) — Destra: 1x LOW (D8) + 1x PWM (D11)
+const int L_A = 5;   // sinistro, direz A (PWM per AVANTI)
+const int L_B = 6;   // sinistro, direz B (PWM per INDIETRO)
+const int R_A = 8;   // destro, direz A (sempre LOW/HIGH)
+const int R_B = 11;  // destro, direz B (PWM in entrambe le direzioni)
+
+// Se dopo i cambi cablaggio noti ancora inversioni, puoi cambiare questi flag:
+bool INVERT_FORWARD  = false; // inverte avanti<->indietro
+bool INVERT_TURN     = false; // inverte sinistra<->destra
 
 // ------------------ LED STRIP ------------------
 #define LED_PIN    3
 #define LED_COUNT  9
 Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+uint8_t ledR=255, ledG=180, ledB=100;
+uint8_t ledBrightness=60;
+bool     leds_are_on=false;
 
-uint8_t ledR = 255, ledG = 180, ledB = 100; // colore “bianco caldo”
-uint8_t ledBrightness = 60;                  // 0–255
-bool     leds_are_on = false;
+// ------------------ SERVI ------------------
+const int SERVO_PINS[4] = {4, 7, A0, A1}; // Base, Spalla, Gomito, Pinza
+Servo servos[4];
+bool  servos_attached = false;
 
-// ------------------ WATCHDOG MOTORI ------------------
-const unsigned long WATCHDOG_MS = 1000; // se non arrivano comandi, stop
+// Angoli correnti e HOME (puoi cambiarli dopo i test)
+int servoAngles[4]   = {90, 90, 90, 90};
+int servoHome[4]     = {90, 90, 90, 90};
+
+// ------------------ WATCHDOG ------------------
+const unsigned long WATCHDOG_MS = 1000;
 unsigned long lastCmdMs = 0;
 
 // =====================================================
 // SETUP
 // =====================================================
 void setup() {
-  pinMode(L1, OUTPUT); pinMode(L2, OUTPUT);
-  pinMode(R1, OUTPUT); pinMode(R2, OUTPUT);
+  // Motori
+  pinMode(L_A, OUTPUT); pinMode(L_B, OUTPUT);
+  pinMode(R_A, OUTPUT); pinMode(R_B, OUTPUT);
   stopMotors();
 
+  // LED
   strip.begin();
   strip.setBrightness(ledBrightness);
   ledsOff();
 
+  // Servi (non attacco subito, puoi usare SV ATTACH)
+  // attachServos(); // se vuoi attaccarli all'avvio, scommenta
+
   Serial.begin(115200);
-  while (!Serial) { /* attende seriale su alcuni cloni */ }
+  while (!Serial) {}
   Serial.println("READY");
   lastCmdMs = millis();
 }
@@ -53,8 +71,6 @@ void loop() {
     handleCommand(line);
     lastCmdMs = millis();
   }
-
-  // watchdog sicurezza
   if (millis() - lastCmdMs > WATCHDOG_MS) {
     stopMotors();
   }
@@ -66,15 +82,20 @@ void loop() {
 void handleCommand(const String &cmd) {
   if (cmd.length() == 0) return;
 
-  // --- LED commands ---
   if (cmd.startsWith("LED")) { handleLED(cmd); return; }
+  if (cmd.startsWith("SV"))  { handleServo(cmd); return; }
 
-  // --- Motor commands ---
+  // Motori
   char c = cmd.charAt(0);
   int spd = 0;
   if (cmd.length() > 1) spd = constrain(cmd.substring(1).toInt(), 0, 255);
 
-  switch (c) {
+  // Applica inversioni richieste
+  char op = c;
+  if (INVERT_FORWARD && (c=='F' || c=='B')) op = (c=='F') ? 'B' : 'F';
+  if (INVERT_TURN    && (c=='L' || c=='R')) op = (c=='L') ? 'R' : 'L';
+
+  switch (op) {
     case 'F': forward(spd);  Serial.println("OK F"); break;
     case 'B': backward(spd); Serial.println("OK B"); break;
     case 'L': turnLeft(spd); Serial.println("OK L"); break;
@@ -85,101 +106,140 @@ void handleCommand(const String &cmd) {
 }
 
 // =====================================================
-// MOTORS (PWM direttamente sugli IN del ponte H)
+// MOTORS  (L298N: PWM su un pin, LOW sull'altro)
 // =====================================================
 
-// Avanti: PWM su L1/R1, L2/R2 LOW
 void forward(int spd) {
-  analogWrite(L1, spd); digitalWrite(L2, LOW);
-  analogWrite(R1, spd); digitalWrite(R2, LOW);
+  // Sinistra AVANTI: L_A PWM, L_B LOW
+  analogWrite(L_A, spd); digitalWrite(L_B, LOW);
+  // Destra AVANTI: R_A LOW, R_B PWM
+  digitalWrite(R_A, LOW); analogWrite(R_B, spd);
 }
 
-// Indietro: PWM su L2/R2, L1/R1 LOW
 void backward(int spd) {
-  digitalWrite(L1, LOW); analogWrite(L2, spd);
-  digitalWrite(R1, LOW); analogWrite(R2, spd);
+  // Sinistra INDIETRO: L_A LOW, L_B PWM
+  digitalWrite(L_A, LOW); analogWrite(L_B, spd);
+  // Destra INDIETRO: R_A HIGH, R_B PWM (inverte corrente)
+  digitalWrite(R_A, HIGH); analogWrite(R_B, spd);
 }
 
-// Rotazioni (corrette: L = sinistra, R = destra)
 void turnLeft(int spd) {
-  // sinistro avanti, destro indietro
-  analogWrite(L1, spd);  digitalWrite(L2, LOW); // sinistro avanti
-  digitalWrite(R1, LOW); analogWrite(R2, spd);  // destro indietro
+  // sinistra indietro, destra avanti
+  digitalWrite(L_A, LOW); analogWrite(L_B, spd);
+  digitalWrite(R_A, LOW); analogWrite(R_B, spd);
 }
 
 void turnRight(int spd) {
-  // sinistro indietro, destro avanti
-  digitalWrite(L1, LOW); analogWrite(L2, spd);  // sinistro indietro
-  analogWrite(R1, spd);  digitalWrite(R2, LOW); // destro avanti
+  // sinistra avanti, destra indietro
+  analogWrite(L_A, spd); digitalWrite(L_B, LOW);
+  digitalWrite(R_A, HIGH); analogWrite(R_B, spd);
 }
 
 void stopMotors() {
-  analogWrite(L1, 0); analogWrite(L2, 0);
-  analogWrite(R1, 0); analogWrite(R2, 0);
-  // “coast”: tutti LOW. Per freno attivo puoi impostare coppie opposte.
-  digitalWrite(L1, LOW); digitalWrite(L2, LOW);
-  digitalWrite(R1, LOW); digitalWrite(R2, LOW);
+  analogWrite(L_A, 0); analogWrite(L_B, 0);
+  analogWrite(R_B, 0);
+  digitalWrite(L_A, LOW); digitalWrite(L_B, LOW);
+  digitalWrite(R_A, LOW); // freno “coast” lato R_B già 0
 }
 
 // =====================================================
 // LEDS
 // =====================================================
 void ledsApply(bool on) {
-  strip.setBrightness(ledBrightness); // applica brightness corrente
-  for (int i=0; i<LED_COUNT; i++) {
+  strip.setBrightness(ledBrightness);
+  for (int i=0;i<LED_COUNT;i++) {
     if (on) strip.setPixelColor(i, strip.Color(ledR, ledG, ledB));
     else    strip.setPixelColor(i, 0);
   }
   strip.show();
   leds_are_on = on;
 }
-
 void ledsOn()  { ledsApply(true); }
 void ledsOff() { ledsApply(false); }
 
-// Parser LED:
-//  - "LED ON" / "LED OFF"
-//  - "LED RGB r g b" (accende con quel colore)
-//  - "LED BR n" (0–255) mantiene stato ON/OFF
 void handleLED(const String &cmd) {
   if (cmd.equalsIgnoreCase("LED ON"))  { ledsOn();  Serial.println("OK LED ON");  return; }
   if (cmd.equalsIgnoreCase("LED OFF")) { ledsOff(); Serial.println("OK LED OFF"); return; }
 
   if (cmd.startsWith("LED RGB")) {
-    // formato: LED RGB r g b
-    int i1 = cmd.indexOf(' ', 3);          // dopo "LED"
-    int i2 = cmd.indexOf(' ', i1 + 1);     // dopo "RGB"
+    int i1 = cmd.indexOf(' ', 3);
+    int i2 = cmd.indexOf(' ', i1+1);
     if (i2 > 0) {
-      String rest = cmd.substring(i2 + 1); rest.trim();
-      int a=0, b=0, c=0;
+      String rest = cmd.substring(i2+1); rest.trim();
+      int a=0,b=0,c=0;
       int p1 = rest.indexOf(' ');
       int p2 = rest.lastIndexOf(' ');
-      if (p1 > 0 && p2 > p1) {
-        a = constrain(rest.substring(0, p1).toInt(), 0, 255);
-        b = constrain(rest.substring(p1 + 1, p2).toInt(), 0, 255);
-        c = constrain(rest.substring(p2 + 1).toInt(), 0, 255);
-        ledR = a; ledG = b; ledB = c;
+      if (p1>0 && p2>p1) {
+        a = constrain(rest.substring(0,p1).toInt(), 0, 255);
+        b = constrain(rest.substring(p1+1,p2).toInt(), 0, 255);
+        c = constrain(rest.substring(p2+1).toInt(), 0, 255);
+        ledR=a; ledG=b; ledB=c;
         ledsOn();
         Serial.println("OK LED RGB");
         return;
       }
     }
-    Serial.println("ERR LED RGB");
-    return;
+    Serial.println("ERR LED RGB"); return;
   }
 
   if (cmd.startsWith("LED BR")) {
-    // formato: LED BR n
     int i = cmd.lastIndexOf(' ');
-    if (i > 0) {
-      ledBrightness = constrain(cmd.substring(i + 1).toInt(), 0, 255);
+    if (i>0) {
+      ledBrightness = constrain(cmd.substring(i+1).toInt(), 0, 255);
       ledsApply(leds_are_on);
       Serial.println("OK LED BR");
       return;
     }
-    Serial.println("ERR LED BR");
-    return;
+    Serial.println("ERR LED BR"); return;
   }
 
   Serial.println("ERR LED");
+}
+
+// =====================================================
+// SERVI
+// =====================================================
+void attachServos(){
+  if (servos_attached) return;
+  for (int i=0;i<4;i++){
+    servos[i].attach(SERVO_PINS[i]);
+    servos[i].write(constrain(servoAngles[i], 0, 180));
+  }
+  servos_attached = true;
+}
+void detachServos(){
+  if (!servos_attached) return;
+  for (int i=0;i<4;i++) servos[i].detach();
+  servos_attached = false;
+}
+void setServo(int idx, int ang){
+  if (idx<0 || idx>3) return;
+  servoAngles[idx] = constrain(ang, 0, 180);
+  if (servos_attached) servos[idx].write(servoAngles[idx]);
+}
+void goHome(){
+  for (int i=0;i<4;i++){
+    servoAngles[i] = constrain(servoHome[i], 0, 180);
+    if (servos_attached) servos[i].write(servoAngles[i]);
+  }
+}
+
+void handleServo(const String &cmd){
+  if (cmd.equalsIgnoreCase("SV ATTACH")) { attachServos(); Serial.println("OK SV ATTACH"); return; }
+  if (cmd.equalsIgnoreCase("SV DETACH")) { detachServos(); Serial.println("OK SV DETACH"); return; }
+  if (cmd.equalsIgnoreCase("SV HOME"))   { goHome();      Serial.println("OK SV HOME");   return; }
+
+  // "SV i a"
+  // es: "SV 2 135"
+  int sp1 = cmd.indexOf(' ');
+  int sp2 = cmd.lastIndexOf(' ');
+  if (sp1>0 && sp2>sp1) {
+    int idx = cmd.substring(sp1+1, sp2).toInt();
+    int ang = cmd.substring(sp2+1).toInt();
+    setServo(idx, ang);
+    Serial.print("OK SV "); Serial.print(idx); Serial.print(' '); Serial.println(ang);
+    return;
+  }
+
+  Serial.println("ERR SV");
 }

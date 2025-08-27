@@ -123,6 +123,39 @@
           <div class="status" id="ledStatus">Usa <span class="kbd">Spazio</span> per ON/OFF veloce.</div>
         </div>
       </div>
+
+      <div class="card">
+        <h3>Braccio robotico</h3>
+        <div class="content">
+          <div class="row" style="margin-bottom:8px; gap:8px;">
+            <button id="svAttach" class="btn">Attacca servi</button>
+            <button id="svDetach" class="btn">Stacca servi</button>
+            <button id="svHome"   class="btn">Vai HOME</button>
+          </div>
+      
+          <div class="grid2">
+            <div>
+              <div class="row"><div class="label">Base (Y)</div><div class="pill"><span id="sv0Val">90</span>°</div></div>
+              <input id="sv0" class="range" type="range" min="0" max="180" value="90"/>
+            </div>
+            <div>
+              <div class="row"><div class="label">Spalla (X1)</div><div class="pill"><span id="sv1Val">90</span>°</div></div>
+              <input id="sv1" class="range" type="range" min="0" max="180" value="90"/>
+            </div>
+            <div>
+              <div class="row"><div class="label">Gomito (X2)</div><div class="pill"><span id="sv2Val">90</span>°</div></div>
+              <input id="sv2" class="range" type="range" min="0" max="180" value="90"/>
+            </div>
+            <div>
+              <div class="row"><div class="label">Pinza</div><div class="pill"><span id="sv3Val">90</span>°</div></div>
+              <input id="sv3" class="range" type="range" min="0" max="180" value="90"/>
+            </div>
+          </div>
+      
+          <div class="status">Sposta gli slider: l’angolo appare accanto. Quando hai definito gli HOME desiderati, dimmeli e li fisso nel firmware.</div>
+        </div>
+      </div>
+      
     </div>
   </div>
 
@@ -309,8 +342,34 @@ async function pollHealth(){
     alertsWrap.style.display = 'none';
   }
 }
+
 setInterval(pollHealth, 2000);
 pollHealth();
 </script>
+
+<script>
+  // ---- Braccio: helper per slider -> comando SV i a ----
+  function bindServoSlider(id, idx){
+    const slider = document.getElementById(id);
+    const label  = document.getElementById(id + "Val");
+    let debounce = null;
+    const sendNow = ()=>{ const a = parseInt(slider.value); label.textContent = a; send(`SV ${idx} ${a}`); };
+    slider.addEventListener('input', ()=>{
+      label.textContent = slider.value;
+      clearTimeout(debounce);
+      debounce = setTimeout(sendNow, 50);
+    });
+    slider.addEventListener('change', sendNow);
+  }
+  bindServoSlider('sv0', 0);
+  bindServoSlider('sv1', 1);
+  bindServoSlider('sv2', 2);
+  bindServoSlider('sv3', 3);
+  
+  document.getElementById('svAttach').addEventListener('click', ()=> send('SV ATTACH'));
+  document.getElementById('svDetach').addEventListener('click', ()=> send('SV DETACH'));
+  document.getElementById('svHome').addEventListener('click',   ()=> send('SV HOME'));
+  </script>
+  
 </body>
 </html>
