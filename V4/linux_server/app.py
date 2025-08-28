@@ -1,231 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os
 import time
-import json
 import threading
-from pathlib import Path
-
-import cv2
-import serial
-import serial.tools.list_ports
 from flask import Flask, render_template, Response, request, jsonify
 
-# flag per capire se abbiamo applicato i settaggi con successo
-applied_once = False
-applied_lock = threading.Lock()
+from settings_store import settings, load_settings, save_settings, DEFAULTS
+from video_hub import video_hub
+from serial_bridge import SerialBridge
 
-def wait_arduino_ready(port, timeout=5.0):
-    """Legge la seriale finché non vede 'READY' (o timeout)."""
-    try:
-        port.reset_input_buffer()
-    except Exception:
-        pass
-    t0 = time.time()
-    buf = b""
-    while time.time() - t0 < timeout:
-        try:
-            if port.in_waiting:
-                buf += port.readline()
-                if b"READY" in buf:
-                    print("[serial] READY ricevuto")
-                    return True
-        except Exception:
-            pass
-        time.sleep(0.05)
-    print("[serial] READY non ricevuto entro timeout")
-    return False
-
-
-# ============== Flask app (prima di tutto!) ==============
 app = Flask(__name__)
 
-# ============== Settings persistenti =====================
-BASE_DIR = Path(__file__).resolve().parent
-SETTINGS_PATH = BASE_DIR / "settings.json"
-DEFAULT_SETTINGS = {
-    "led_color": [255, 180, 100],      # R,G,B
-    "led_brightness": 60,              # 0-255
-    "led_on": False,
-    "motor_default_speed": 150,        # slider di default lato UI
-    "servo_angles": [90, 90, 90, 90],  # Base, Spalla, Gomito, Pinza
-}
-settings = {}  # popolato da load_settings()
+# --- Bootstrap: settings + serial + video ---
+load_settings()                # carica settings.json in memoria
+bridge = SerialBridge()        # gestione seriale/READY/applicazione settaggi
+bridge.open()                  # apre seriale e attende READY (con timeout) + schedule apply
+video_hub.start()              # avvia thread lettura camera (single producer)
 
-def load_settings():
-    global settings
-    if SETTINGS_PATH.exists():
-        try:
-            disk = json.loads(SETTINGS_PATH.read_text())
-        except Exception:
-            disk = {}
-        settings = {**DEFAULT_SETTINGS, **disk}
-    else:
-        settings = DEFAULT_SETTINGS.copy()
-
-def save_settings():
-    try:
-        SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
-    except Exception as e:
-        print("[settings] write error:", e)
-
-# ============== Serial Arduino ===========================
-def open_arduino():
-    """Prova ad aprire la seriale dell'Arduino."""
-    # 1) scan porte note
-    for p in serial.tools.list_ports.comports():
-        if "Arduino" in (p.description or "") or "CDC" in (p.description or "") \
-           or "ttyACM" in p.device or "ttyUSB" in p.device:
-            try:
-                print(f"[serial] provo {p.device}")
-                return serial.Serial(p.device, 115200, timeout=0.1)
-            except Exception as e:
-                print(f"[serial] fail {p.device}: {e}")
-    # 2) fallback
-    for dev in ("/dev/ttyACM0", "/dev/ttyUSB0", "/dev/ttyUSB1"):
-        try:
-            print(f"[serial] provo {dev}")
-            return serial.Serial(dev, 115200, timeout=0.1)
-        except Exception:
-            pass
-    print("[serial] nessuna porta trovata")
-    return None
-
-ser = None  # inizializzato dopo load_settings()
-
-# ============== Camera HUB: single-producer, multi-consumer ==============
-import threading
-
-def _try_open_index(idx, fourcc_pref=None):
-    cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
-    if not cap or not cap.isOpened():
-        if cap: cap.release()
-        return None
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 20)
-    if fourcc_pref:
-        cap.set(cv2.CAP_PROP_FOURCC, fourcc_pref)
-    ok, frame = cap.read()
-    if ok and frame is not None:
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"[cam] aperta index {idx} ({w}x{h})")
-        return cap
-    cap.release()
-    return None
-
-def _open_camera_any():
-    for idx in range(4):
-        cap = _try_open_index(idx, cv2.VideoWriter_fourcc(*'MJPG'))
-        if cap: return cap
-    for idx in range(4):
-        cap = _try_open_index(idx, cv2.VideoWriter_fourcc(*'YUY2'))
-        if cap: return cap
-    print("[cam] nessuna camera disponibile")
-    return None
-
-class VideoHub:
-    def __init__(self):
-        self.cap = None
-        self.lock = threading.Lock()
-        self.last_jpeg = None
-        self.running = False
-        self.thread = None
-
-    def start(self):
-        if self.running: return
-        self.running = True
-        self.cap = _open_camera_any()
-        self.thread = threading.Thread(target=self._loop, daemon=True)
-        self.thread.start()
-
-    def _loop(self):
-        while self.running:
-            if self.cap is None or not self.cap.isOpened():
-                time.sleep(1.0)
-                self.cap = _open_camera_any()
-                continue
-            try:
-                ok, frame = self.cap.read()
-            except cv2.error:
-                ok, frame = False, None
-            if not ok or frame is None:
-                # riapri la camera
-                try:
-                    self.cap.release()
-                except Exception:
-                    pass
-                self.cap = None
-                continue
-            # encoda a JPEG una volta sola per tutti i client
-            try:
-                ret, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
-                if ret:
-                    with self.lock:
-                        self.last_jpeg = buf.tobytes()
-            except cv2.error:
-                # salta frame corrotti e continua
-                continue
-            # piccolo respiro per non saturare la CPU (FPS ~20 già impostato)
-            time.sleep(0.001)
-
-    def get_jpeg(self):
-        with self.lock:
-            return self.last_jpeg
-
-video_hub = VideoHub()
-video_hub.start()
-
-def mjpeg_generator():
-    boundary = b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'
-    while True:
-        jpg = video_hub.get_jpeg()
-        if jpg is None:
-            time.sleep(0.05)
-            continue
-        try:
-            yield boundary + jpg + b'\r\n'
-        except GeneratorExit:
-            # client ha chiuso la connessione
-            break
-        except Exception:
-            # qualsiasi errore di socket: interrompi questo client
-            break
-
-# ============== Applicazione settings all'avvio ==========
-def apply_settings_to_arduino():
-    """Invia a Arduino le impostazioni persistite e marca applied_once."""
-    global applied_once
-    if ser is None or not ser.is_open:
-        print("[settings] seriale non disponibile: skip apply")
-        return
-    ok = False
-    try:
-        r, g, b = settings.get("led_color", DEFAULT_SETTINGS["led_color"])
-        br = int(settings.get("led_brightness", DEFAULT_SETTINGS["led_brightness"]))
-        on = bool(settings.get("led_on", DEFAULT_SETTINGS["led_on"]))
-        # 1) aggiorna parametri SENZA accendere
-        ser.write(f"LED BR {br}\n".encode('ascii')); time.sleep(0.02)
-        ser.write(f"LED RGB {r} {g} {b}\n".encode('ascii')); time.sleep(0.02)
-        # 2) stato finale
-        ser.write(( "LED ON\n" if on else "LED OFF\n").encode('ascii')); time.sleep(0.02)
-        # Servi
-        angles = settings.get("servo_angles", DEFAULT_SETTINGS["servo_angles"])
-        if isinstance(angles, (list, tuple)) and len(angles) == 4:
-            for i, a in enumerate(angles):
-                ser.write(f"SV {i} {int(a)}\n".encode('ascii'))
-                time.sleep(0.01)
-        ok = True
-        print("[settings] applicate (LED {}, BR {}, RGB {},{},{})".format("ON" if on else "OFF", br, r, g, b))
-    except Exception as e:
-        print("[settings] apply error:", e)
-    if ok:
-        with applied_lock:
-            applied_once = True
-
-# ============== Routes ===================================
+# ---------- ROUTES ----------
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -236,15 +28,26 @@ def vr():
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(mjpeg_generator(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(video_hub.mjpeg_generator(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/health')
+def health():
+    video_ok  = video_hub.has_frame
+    serial_ok = bridge.is_open
+    return jsonify(video=video_ok, serial=serial_ok, ok=(video_ok and serial_ok))
 
+# ---- Comandi seriali inoltrati al Nano ----
 @app.route('/cmd', methods=['POST'])
 def cmd():
     data = request.get_json(silent=True) or {}
     c = (data.get('c') or '').strip()
+    if not c:
+        return jsonify(ok=False, err="missing command"), 400
+    if not bridge.is_open:
+        return jsonify(ok=False, err="serial not available"), 503
 
-    # Aggiorna settings quando l'utente fa ON/OFF dalla UI
+    # Aggiorna stato luci in settings se ON/OFF
     cu = c.upper()
     if cu == "LED ON":
         settings["led_on"] = True
@@ -253,41 +56,17 @@ def cmd():
         settings["led_on"] = False
         save_settings()
 
+    # Se è la prima volta e arriva LED ON, applica settaggi prima di inoltrare
+    if cu == "LED ON" and not bridge.applied_once:
+        bridge.apply_settings_now(settings)
+        time.sleep(0.02)
 
-    if not c:
-        return jsonify(ok=False, err="missing command"), 400
-    if ser is None or not ser.is_open:
-        return jsonify(ok=False, err="serial not available"), 503
-
-    # --- se è LED ON e non abbiamo ancora applicato i settaggi, applicali ora ---
-    if c.upper() == "LED ON":
-        with applied_lock:
-            pending = not applied_once
-        if pending:
-            apply_settings_to_arduino()
-            # piccolo delay per garantire ordine dei comandi
-            time.sleep(0.02)
-
-    try:
-        ser.write((c + "\n").encode('ascii'))
-        return jsonify(ok=True)
-    except Exception as e:
-        return jsonify(ok=False, err=str(e)), 500
-
-
-@app.route('/apply_settings_now', methods=['POST'])
-def apply_settings_now():
-    threading.Thread(target=apply_settings_to_arduino, daemon=True).start()
+    ok, err = bridge.write_line(c)
+    if not ok:
+        return jsonify(ok=False, err=err or "write failed"), 500
     return jsonify(ok=True)
 
-
-@app.route('/health')
-def health():
-    video_ok = (cap is not None and cap.isOpened())
-    serial_ok = (ser is not None and ser.is_open)
-    return jsonify(video=video_ok, serial=serial_ok, ok=(video_ok and serial_ok))
-
-# ---- settings persistenti ----
+# ---- Settings persistenti ----
 @app.route('/settings', methods=['GET'])
 def get_settings():
     return jsonify(settings)
@@ -296,35 +75,23 @@ def get_settings():
 def set_settings():
     data = request.get_json(silent=True) or {}
     changed = False
-    for k in ("led_color", "led_brightness", "led_on", "motor_default_speed", "servo_angles"):
+    for k in ("led_color", "led_brightness", "led_on",
+              "motor_default_speed", "servo_angles"):
         if k in data:
             settings[k] = data[k]
             changed = True
     if changed:
         save_settings()
     if data.get("apply"):
-        # applica subito a Arduino (senza ARM)
-        threading.Thread(target=apply_settings_to_arduino, daemon=True).start()
+        bridge.apply_settings_now(settings)
     return jsonify(ok=True, settings=settings)
 
-# ============== Bootstrap =================================
-def bootstrap():
-    global ser, cap, applied_once
-    load_settings()
-    ser = open_arduino()
-    # Attendi che l'Arduino annunci READY (reset auto su apertura seriale)
-    if ser and ser.is_open:
-        ready = wait_arduino_ready(ser, timeout=5.0)
-        # anche se non lo vediamo, proviamo ad applicare dopo un attimo
-        delay = 0.2 if ready else 1.5
-        threading.Timer(delay, apply_settings_to_arduino).start()
-    else:
-        applied_once = False
+# Facoltativo: applica subito (usato per debug/UI)
+@app.route('/apply_settings_now', methods=['POST'])
+def apply_settings_now():
+    bridge.apply_settings_now(settings)
+    return jsonify(ok=True)
 
-
-bootstrap()
-
-# ============== Main ======================================
 if __name__ == '__main__':
-    # ascolta su tutta la LAN
+    # ascolta sulla LAN
     app.run(host='0.0.0.0', port=8080, threaded=True)
