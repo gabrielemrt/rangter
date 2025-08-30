@@ -1,36 +1,88 @@
 #!/usr/bin/env bash
-set -e
+# Installazione dipendenze per Rover (Ubuntu / RPi OS compatibile)
+# - Non si ferma se alcuni pacchetti non esistono (es. libcamera-apps su Ubuntu)
 
-echo "[1/6] Aggiorno i pacchetti di sistema..."
-sudo apt update
-sudo apt -y upgrade
+set -u
 
-echo "[2/6] Strumenti base..."
-sudo apt install -y git curl tmux build-essential pkg-config cmake unzip \
-    python3 python3-pip python3-venv python3-dev python3-setuptools python3-wheel
+log() { printf "\n[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
+OK_LIST=()
+SKIP_LIST=()
+FAIL_LIST=()
 
-echo "[3/6] Librerie per video/camera..."
-# OpenCV da pacchetto
-sudo apt install -y python3-opencv v4l-utils ffmpeg
+apt_install() {
+  # usage: apt_install pkg1 [pkg2 ...]
+  for PKG in "$@"; do
+    if apt-cache policy "$PKG" 2>/dev/null | grep -q 'Candidate:'; then
+      log "Installo $PKG ..."
+      if sudo apt-get install -y "$PKG"; then
+        OK_LIST+=("$PKG")
+      else
+        FAIL_LIST+=("$PKG")
+      fi
+    else
+      log "Pacchetto non trovato in repo: $PKG (lo salto)"
+      SKIP_LIST+=("$PKG")
+    fi
+  done
+}
 
-# librerie utili per compilazioni future (jpeg, png, ecc.)
-sudo apt install -y libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev libswscale-dev \
-    libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev gfortran
+pip_install() {
+  # usage: pip_install pkg1 [pkg2 ...]  (non blocca)
+  for P in "$@"; do
+    log "pip install $P ..."
+    if pip3 install --no-cache-dir "$P"; then
+      OK_LIST+=("pip:$P")
+    else
+      FAIL_LIST+=("pip:$P")
+    fi
+  done
+}
 
-echo "[4/6] Libcamera & Picamera2 (per Camera Module CSI)..."
-# su Ubuntu ufficiale non sempre c'è picamera2. Se usi Ubuntu Server for Raspberry,
-# puoi installare via pip la parte Python.
-sudo apt install -y libcamera0 libcamera-apps
-pip3 install --upgrade pip
-pip3 install picamera2 --extra-index-url https://www.piwheels.org/simple
+log "[1/6] Aggiornamento sistema..."
+sudo apt-get update -y || true
+sudo apt-get -y upgrade || true
 
-echo "[5/6] Librerie Python del progetto..."
-pip3 install flask pyserial
+log "[2/6] Strumenti base..."
+apt_install git curl tmux build-essential pkg-config cmake unzip \
+            python3 python3-pip python3-venv python3-dev python3-setuptools python3-wheel
 
-echo "[6/6] Pulizia..."
-sudo apt -y autoremove
-echo "---------------------------------------------------------"
-echo "Dipendenze installate. Ora puoi avviare il progetto:"
-echo "  cd ~/Desktop/rangter/V4/linux_server"
-echo "  python3 app.py"
-echo "---------------------------------------------------------"
+log "[3/6] Video / multimedia / OpenCV lato sistema..."
+apt_install python3-opencv v4l-utils ffmpeg \
+            libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev libswscale-dev \
+            libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev gfortran
+
+log "[4/6] Stack camera (CSI / libcamera) — prova ciò che esiste sulla tua distro..."
+# Su Ubuntu troverai tipicamente: libcamera0.2, libcamera-tools, gstreamer1.0-libcamera
+# Su Raspberry Pi OS: libcamera0, libcamera-apps
+apt_install libcamera0 libcamera0.2 libcamera-tools gstreamer1.0-libcamera libcamera-apps
+
+log "[5/6] Python: aggiorno pip e installo librerie del progetto..."
+pip3 install --upgrade pip || true
+# Dipendenze applicative
+pip_install flask pyserial
+
+# Picamera2: su Ubuntu potrebbe NON avere wheel pronta; tentiamo e non blocchiamo
+# (su RPi OS funziona; su Ubuntu spesso servono binding libcamera python precompilati)
+pip_install picamera2
+
+log "[6/6] Pulizia..."
+sudo apt-get -y autoremove || true
+
+log "========== REPORT =========="
+printf "OK:   %s\n" "${OK_LIST[*]:-—}"
+printf "SKIP: %s\n" "${SKIP_LIST[*]:-—}"
+printf "FAIL: %s\n" "${FAIL_LIST[*]:-—}"
+
+cat <<'EOF'
+
+Note importanti:
+- Se stai usando una WEBCAM USB, lo stream funziona già con OpenCV (python3-opencv).
+- Se stai usando la **Camera Module 3 (CSI)** su Ubuntu:
+  * prova ad installare: libcamera0.2, libcamera-tools, gstreamer1.0-libcamera (già tentato sopra).
+  * la libreria **Picamera2** via pip può fallire su Ubuntu; il nostro codice comunque
+    funziona anche solo USB. Se vuoi usare CSI su Ubuntu e Picamera2 non si installa,
+    ti consiglio Raspberry Pi OS Bookworm (supporto migliore alla CSI).
+- Per avviare il progetto:
+    cd ~/Desktop/rangter/V4/linux_server
+    python3 app.py
+EOF
