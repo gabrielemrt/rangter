@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Installazione dipendenze per Rover (Ubuntu / RPi OS compatibile)
-# - Non si ferma se alcuni pacchetti non esistono (es. libcamera-apps su Ubuntu)
+# Installazione dipendenze per Rover su Raspberry Pi OS (Bookworm)
+# - Tollerante agli errori: continua anche se qualche pacchetto non esiste
+# - Installa libcamera + picamera2 (per Camera Module 3 / CSI)
+# - Installa OpenCV, Flask, PySerial
+# - Prepara un venv in ~/Desktop/rangter/V4/linux_server/venv (se la cartella esiste)
 
 set -u
 
-log() { printf "\n[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
-OK_LIST=()
-SKIP_LIST=()
-FAIL_LIST=()
+log(){ printf "\n[%s] %s\n" "$(date +%H:%M:%S)" "$*"; }
+OK_LIST=(); SKIP_LIST=(); FAIL_LIST=()
 
 apt_install() {
-  # usage: apt_install pkg1 [pkg2 ...]
   for PKG in "$@"; do
     if apt-cache policy "$PKG" 2>/dev/null | grep -q 'Candidate:'; then
       log "Installo $PKG ..."
@@ -20,17 +20,18 @@ apt_install() {
         FAIL_LIST+=("$PKG")
       fi
     else
-      log "Pacchetto non trovato in repo: $PKG (lo salto)"
+      log "Pacchetto non trovato nei repo: $PKG (skip)"
       SKIP_LIST+=("$PKG")
     fi
   done
 }
 
 pip_install() {
-  # usage: pip_install pkg1 [pkg2 ...]  (non blocca)
+  local BIN="pip3"
+  command -v "$BIN" >/dev/null 2>&1 || BIN="python3 -m pip"
   for P in "$@"; do
     log "pip install $P ..."
-    if pip3 install --no-cache-dir "$P"; then
+    if $BIN install --no-cache-dir "$P"; then
       OK_LIST+=("pip:$P")
     else
       FAIL_LIST+=("pip:$P")
@@ -38,34 +39,82 @@ pip_install() {
   done
 }
 
-log "[1/6] Aggiornamento sistema..."
+# ---------------- Inizio ----------------
+log "[0/7] Verifico repo Raspberry Pi"
+if ! grep -Rq "archive.raspberrypi.com" /etc/apt/sources.list /etc/apt/sources.list.d 2>/dev/null; then
+  log "Aggiungo repository Raspberry Pi"
+  . /etc/os-release
+  echo "deb http://archive.raspberrypi.com/debian ${VERSION_CODENAME} main" | sudo tee /etc/apt/sources.list.d/raspi.list
+fi
+
+log "[1/7] Aggiorno sistema"
 sudo apt-get update -y || true
 sudo apt-get -y upgrade || true
 
-log "[2/6] Strumenti base..."
+log "[2/7] Strumenti base"
 apt_install git curl tmux build-essential pkg-config cmake unzip \
             python3 python3-pip python3-venv python3-dev python3-setuptools python3-wheel
 
-log "[3/6] Video / multimedia / OpenCV lato sistema..."
+log "[3/7] Multimedia / OpenCV lato sistema"
 apt_install python3-opencv v4l-utils ffmpeg \
             libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev libswscale-dev \
             libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev gfortran
 
-log "[4/6] Stack camera (CSI / libcamera) — prova ciò che esiste sulla tua distro..."
-# Su Ubuntu troverai tipicamente: libcamera0.2, libcamera-tools, gstreamer1.0-libcamera
-# Su Raspberry Pi OS: libcamera0, libcamera-apps
-apt_install libcamera0 libcamera0.2 libcamera-tools gstreamer1.0-libcamera libcamera-apps
+log "[4/7] Stack camera (CSI / libcamera per Pi)"
+# Su Raspberry Pi OS i pacchetti corretti sono questi
+apt_install libcamera0 libcamera-apps python3-picamera2
 
-log "[5/6] Python: aggiorno pip e installo librerie del progetto..."
+# Abilita auto-detect camera se non presente
+if ! grep -q "^camera_auto_detect=1" /boot/firmware/config.txt 2>/dev/null; then
+  log "Abilito camera_auto_detect=1 in /boot/firmware/config.txt"
+  echo "camera_auto_detect=1" | sudo tee -a /boot/firmware/config.txt >/dev/null
+fi
+
+# Assicura appartenenza al gruppo 'video'
+if ! id -nG "$USER" | grep -qw video; then
+  log "Aggiungo $USER al gruppo 'video' (richiede logout/login)"
+  sudo usermod -aG video "$USER" || true
+fi
+
+log "[5/7] Python: aggiorno pip e dipendenze app"
 pip3 install --upgrade pip || true
-# Dipendenze applicative
-pip_install flask pyserial
 
-# Picamera2: su Ubuntu potrebbe NON avere wheel pronta; tentiamo e non blocchiamo
-# (su RPi OS funziona; su Ubuntu spesso servono binding libcamera python precompilati)
-pip_install picamera2
+# Prepara (se esiste) la cartella del progetto per venv
+APP_DIR="$HOME/Desktop/rangter/V4/linux_server"
+if [ -d "$APP_DIR" ]; then
+  log "Creo venv in $APP_DIR/venv"
+  python3 -m venv "$APP_DIR/venv" || true
+  # shellcheck disable=SC1091
+  source "$APP_DIR/venv/bin/activate" 2>/dev/null || true
+  if [ -f "$APP_DIR/requirements.txt" ]; then
+    log "requirements.txt trovato: installo dipendenze"
+    pip_install -r "$APP_DIR/requirements.txt"
+  else
+    log "requirements.txt non trovato: installo dipendenze base per app Flask"
+    pip_install flask pyserial
+  fi
+else
+  log "Cartella progetto non trovata ($APP_DIR). Installo dipendenze globali base"
+  pip_install flask pyserial
+fi
 
-log "[6/6] Pulizia..."
+log "[6/7] (Opzionale) Arduino CLI (se ti serve programmare il Nano da Pi)"
+# scommenta se vuoi installare automaticamente arduino-cli
+# INSTALL_ARDUINO=1
+if [ "${INSTALL_ARDUINO:-0}" = "1" ]; then
+  if ! command -v arduino-cli >/dev/null 2>&1; then
+    BIN_DIR="$HOME/bin"
+    mkdir -p "$BIN_DIR"
+    log "Installo arduino-cli in $BIN_DIR"
+    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$BIN_DIR" sh || true
+    echo 'export PATH="$HOME/bin:$PATH"' >> "$HOME/.bashrc"
+    source "$HOME/.bashrc" || true
+  else
+    log "arduino-cli già presente"
+  fi
+fi
+
+log "[7/7] Pulizia"
 sudo apt-get -y autoremove || true
 
 log "========== REPORT =========="
@@ -75,14 +124,17 @@ printf "FAIL: %s\n" "${FAIL_LIST[*]:-—}"
 
 cat <<'EOF'
 
-Note importanti:
-- Se stai usando una WEBCAM USB, lo stream funziona già con OpenCV (python3-opencv).
-- Se stai usando la **Camera Module 3 (CSI)** su Ubuntu:
-  * prova ad installare: libcamera0.2, libcamera-tools, gstreamer1.0-libcamera (già tentato sopra).
-  * la libreria **Picamera2** via pip può fallire su Ubuntu; il nostro codice comunque
-    funziona anche solo USB. Se vuoi usare CSI su Ubuntu e Picamera2 non si installa,
-    ti consiglio Raspberry Pi OS Bookworm (supporto migliore alla CSI).
-- Per avviare il progetto:
+Note:
+- Per la Camera Module 3 (CSI) usa i tool:
+    libcamera-hello --list-cameras
+    libcamera-hello
+  Se non vedi nulla, riavvia il Pi:
+    sudo reboot
+
+- Per avviare il server (se la cartella esiste):
     cd ~/Desktop/rangter/V4/linux_server
-    python3 app.py
+    source venv/bin/activate
+    python app.py
+
+- Se hai aggiunto l'utente al gruppo 'video', fai logout/login o riapri la sessione SSH.
 EOF
